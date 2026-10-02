@@ -1,6 +1,6 @@
 # ⚡ Authol-E
 
-> **Hybrid IoT & Serverless Academic Telemetry Orchestrator for ETHOL**  
+> **Hybrid IoT & Serverless Academic Telemetry Orchestrator for ETHOL PENS**  
 > *A high-reliability, event-driven session monitor, multi-student state synchronizer, and multi-channel notification dispatcher.*
 
 [![Architecture](https://img.shields.io/badge/Architecture-Hybrid%20IoT%20%2B%20Serverless-indigo?style=flat-square)]()
@@ -99,11 +99,16 @@ authol-e/
 │   └── requirements.txt          # Python Runtime Dependencies
 ├── dashboard/
 │   └── index.html                # Responsive Web Console (Mobile-Optimized)
-├── firmware-esp32/
-│   ├── platformio.ini            # PlatformIO Configuration & Lib Dependencies
+├── firmware-esp32/               # IoT Scout Firmware (PlatformIO Project)
+│   ├── platformio.ini
 │   ├── src/
-│   │   └── main.cpp              # IoT Scout Firmware (Hardware Event Detector)
-│   └── lib/                      # Modular Drivers & Domain Services
+│   │   └── main.cpp
+│   └── lib/
+├── firmware-arduino/             # IoT Scout Firmware (Arduino IDE Sketch)
+│   ├── README.md                 # Step-by-step Arduino IDE Setup Guide
+│   └── authol_e_scout/
+│       ├── authol_e_scout.ino    # Main Arduino IDE Sketch
+│       └── ...                   # Modular Drivers & Services
 ├── firebase_schema.json          # Pre-configured Realtime Database Schema
 └── README.md                     # System Documentation
 ```
@@ -130,25 +135,20 @@ In your GitHub repository, navigate to **Settings** ➔ **Secrets and variables*
 *(Student accounts and configuration are fetched dynamically from Firebase at runtime).*
 
 ### 3. Flash ESP32 Hardware Scout
-1. Open `firmware-esp32/` using **VS Code** with the **PlatformIO IDE** extension.
-2. Edit `firmware-esp32/src/main.cpp` and update the `Config` namespace:
-   ```cpp
-   namespace Config {
-     const char *kWifiSsid    = "YOUR_WIFI_SSID";
-     const char *kWifiPass    = "YOUR_WIFI_PASSWORD";
-     const char *kScoutUser   = "your_email@student.pens.ac.id";
-     const char *kScoutPass   = "YOUR_CAS_SSO_PASSWORD";
-     const char *kAdminWa     = "628xxxxxxxxxx";
-     const char *kFonnteToken = "YOUR_FONNTE_TOKEN";
-     const char *kFirebaseUrl = "https://YOUR_PROJECT-default-rtdb.firebaseio.com";
-     const char *kGitHubRepo  = "USERNAME/authol-e";
-     const char *kGitHubToken = "ghp_YOUR_PERSONAL_ACCESS_TOKEN";
-   }
-   ```
-3. Connect your ESP32 via USB and upload the firmware:
+
+#### Option A: Using PlatformIO (VS Code)
+1. Open `firmware-esp32/` in **VS Code** with the **PlatformIO IDE** extension.
+2. Edit `firmware-esp32/src/main.cpp` and update the `Config` namespace with your Wi-Fi and API credentials.
+3. Connect your ESP32 via USB and upload:
    ```bash
    pio run --target upload
    ```
+
+#### Option B: Using Arduino IDE
+1. Open `firmware-arduino/authol_e_scout/authol_e_scout.ino` in **Arduino IDE**.
+2. Install **ArduinoJson (v6.21.x)** via Library Manager.
+3. Update the `Config` namespace in the main tab.
+4. Select board **ESP32 Dev Module** and upload! *(See `firmware-arduino/README.md` for details)*.
 
 ---
 
