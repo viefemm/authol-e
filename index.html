@@ -288,7 +288,7 @@
                 <td class="px-4 py-3 font-semibold text-white" x-text="h.matkul"></td>
                 <td class="px-4 py-3">
                   <span class="px-2 py-0.5 rounded-full font-semibold text-[10px]"
-                        :class="h.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : (h.status === 'TEST_OK' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/30' : (h.status === 'OFFLINE_ALERT' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'))"
+                        :class="h.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : (h.status === 'ALREADY_PRESENT' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/30' : (h.status === 'KLOTER_ALERT' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/30' : (h.status === 'TEST_OK' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30' : (h.status === 'OFFLINE_ALERT' || h.status === 'LOGIN_FAILED' || h.status === 'SSO_FAILED' || h.status === 'FAILED' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'))))"
                         x-text="h.status"></span>
                 </td>
                 <td class="px-4 py-3 text-slate-400" x-text="h.message || '-'"></td>
@@ -376,6 +376,14 @@
                  class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono text-[11px]" />
           <p class="text-[10px] text-slate-500 mt-1">Token bot Telegram untuk pengiriman notifikasi ke Chat ID mahasiswa.</p>
         </div>
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center gap-1">
+            <i class="fa-solid fa-calendar-days text-amber-400"></i> ID Matkul 2 Minggu Sekali (Kloter Manual)
+          </label>
+          <input type="text" x-model="configForm.manual_kuliah_ids" placeholder="221835, 221847, 221839, 221840"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono text-[11px]" />
+          <p class="text-[10px] text-slate-500 mt-1">Pisahkan dengan koma. Matkul ini tidak diabsen otomatis, bot hanya mengirim pengingat ke client untuk absen manual sesuai kloter.</p>
+        </div>
 
         <div class="flex items-center justify-end gap-2 pt-4">
           <button type="button" @click="showConfigModal = false"
@@ -418,7 +426,7 @@
         isEditing: false,
         editIndex: -1,
         modalForm: { name: "", user: "", pass: "", wa_target: "", tg_chat_id: "", is_active: true },
-        configForm: { master_pin: "206265", telegram_bot_token: "" },
+        configForm: { master_pin: "206265", telegram_bot_token: "", manual_kuliah_ids: "221835, 221847, 221839, 221840" },
 
         get lastSeenEpoch() {
           if (this.deviceStatus.last_seen_epoch) {
@@ -587,21 +595,40 @@
         },
 
         openConfigModal() {
+          let ids = this.config.manual_kuliah_ids;
+          if (Array.isArray(ids)) {
+            ids = ids.join(", ");
+          } else if (!ids) {
+            ids = "221835, 221847, 221839, 221840";
+          }
           this.configForm = {
             master_pin: this.config.master_pin || "206265",
-            telegram_bot_token: this.config.telegram_bot_token || ""
+            telegram_bot_token: this.config.telegram_bot_token || "",
+            manual_kuliah_ids: ids
           };
           this.showConfigModal = true;
         },
 
         async saveConfig() {
           try {
+            // Format ID matkul manual
+            const rawIds = (this.configForm.manual_kuliah_ids || "")
+              .split(",")
+              .map(s => s.trim())
+              .filter(s => s.length > 0);
+
+            const payload = {
+              master_pin: this.configForm.master_pin,
+              telegram_bot_token: this.configForm.telegram_bot_token,
+              manual_kuliah_ids: rawIds
+            };
+
             await fetch(`${FIREBASE_URL}/config.json`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(this.configForm)
+              body: JSON.stringify(payload)
             });
-            this.config = { ...this.config, ...this.configForm };
+            this.config = { ...this.config, ...payload };
             this.showConfigModal = false;
             alert("✅ Pengaturan berhasil disimpan!");
           } catch (e) {
