@@ -29,9 +29,9 @@ logging.basicConfig(
 
 WIB = pytz.timezone("Asia/Jakarta")
 
-FIREBASE_URL       = os.environ.get("FIREBASE_URL", "https://ethol-bot-default-rtdb.firebaseio.com")
-FONNTE_TOKEN       = os.environ.get("FONNTE_TOKEN", "wB7GEFCDTyDLpU2PjNPp")
-ADMIN_WA           = os.environ.get("ADMIN_WA", "6285175062616")
+FIREBASE_URL       = os.environ.get("FIREBASE_URL", "")
+FONNTE_TOKEN       = os.environ.get("FONNTE_TOKEN", "")
+ADMIN_WA           = os.environ.get("ADMIN_WA", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 JAM_MULAI          = int(os.environ.get("JAM_MULAI", "6"))
 JAM_SELESAI        = int(os.environ.get("JAM_SELESAI", "21"))
@@ -111,7 +111,7 @@ def get_fonnte_token() -> str:
             return FONNTE_TOKEN
     except Exception:
         pass
-    return FONNTE_TOKEN or os.environ.get("FONNTE_TOKEN", "wB7GEFCDTyDLpU2PjNPp")
+    return FONNTE_TOKEN
 
 def send_wa(target: str, message: str) -> bool:
     token = get_fonnte_token()
