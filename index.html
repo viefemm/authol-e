@@ -119,13 +119,13 @@
       <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Fonnte WhatsApp</span>
-          <span class="text-xs text-emerald-400 font-semibold">Active</span>
+          <span class="text-xs text-emerald-400 font-semibold">Ready</span>
         </div>
         <p class="text-lg font-bold text-emerald-400 flex items-center gap-2">
           <i class="fa-brands fa-whatsapp text-xl"></i>
-          <span>Connected</span>
+          <span>Direct API</span>
         </p>
-        <p class="text-xs text-slate-500 mt-1">Notifikasi instan tiap kali presensi</p>
+        <p class="text-xs text-slate-500 mt-1">Uji WA langsung per nomor akun di bawah</p>
       </div>
     </div>
 
@@ -137,7 +137,7 @@
             <i class="fa-solid fa-address-card text-indigo-400"></i>
             Daftar Akun Mahasiswa
           </h2>
-          <p class="text-xs text-slate-400">Toggle switch untuk mengaktifkan atau menonaktifkan akun secara realtime.</p>
+          <p class="text-xs text-slate-400">Toggle switch untuk mengaktifkan akun, dan klik Test WA untuk cek pesan per akun.</p>
         </div>
         <button @click="openAddAccountModal()"
                 class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-lg shadow-indigo-600/20">
@@ -150,7 +150,7 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <template x-for="(acc, index) in accounts" :key="index">
           <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between hover:border-slate-600 transition"
-               :class="acc.is_active ? 'border-l-4 border-l-indigo-500' : 'opacity-60 border-l-4 border-l-slate-600'">
+               :class="acc.is_active ? 'border-l-4 border-l-indigo-500' : 'opacity-70 border-l-4 border-l-slate-600'">
             <div>
               <div class="flex items-start justify-between gap-2 mb-2">
                 <div class="truncate">
@@ -167,19 +167,31 @@
                 </button>
               </div>
 
-              <div class="flex items-center gap-2 text-xs text-slate-400 mt-3 pt-3 border-t border-slate-700/50">
-                <i class="fa-brands fa-whatsapp text-emerald-400"></i>
-                <span x-text="acc.wa_target || 'Tanpa notif WA'"></span>
+              <!-- WHATSAPP NUMBER & TEST WA BUTTON -->
+              <div class="flex items-center justify-between gap-2 text-xs text-slate-400 mt-3 pt-3 border-t border-slate-700/50">
+                <div class="flex items-center gap-2 truncate">
+                  <i class="fa-brands fa-whatsapp text-emerald-400 text-sm"></i>
+                  <span class="font-mono" x-text="acc.wa_target || 'Tanpa no. WA'"></span>
+                </div>
+
+                <button @click="testAccountWhatsApp(index)" :disabled="testingWaIndex === index || !acc.wa_target"
+                        class="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Kirim pesan test WA ke nomor ini">
+                  <i class="fa-solid" :class="testingWaIndex === index ? 'fa-spinner fa-spin' : 'fa-paper-plane'"></i>
+                  <span x-text="testingWaIndex === index ? 'Mengirim...' : 'Test WA'"></span>
+                </button>
               </div>
             </div>
 
             <!-- ACTION BUTTONS -->
-            <div class="flex items-center justify-end gap-2 mt-4">
-              <button @click="openEditAccountModal(index)" class="p-1.5 text-slate-400 hover:text-white transition" title="Edit Akun">
-                <i class="fa-solid fa-pen-to-square text-xs"></i>
+            <div class="flex items-center justify-end gap-2 mt-4 pt-2 border-t border-slate-700/30">
+              <button @click="openEditAccountModal(index)" class="px-2.5 py-1 text-slate-400 hover:text-white text-xs flex items-center gap-1 transition" title="Edit Akun">
+                <i class="fa-solid fa-pen-to-square"></i>
+                <span>Edit</span>
               </button>
-              <button @click="deleteAccount(index)" class="p-1.5 text-slate-400 hover:text-rose-400 transition" title="Hapus Akun">
-                <i class="fa-solid fa-trash text-xs"></i>
+              <button @click="deleteAccount(index)" class="px-2.5 py-1 text-slate-400 hover:text-rose-400 text-xs flex items-center gap-1 transition" title="Hapus Akun">
+                <i class="fa-solid fa-trash"></i>
+                <span>Hapus</span>
               </button>
             </div>
           </div>
@@ -219,7 +231,7 @@
                 <td class="px-4 py-3 font-semibold text-white" x-text="h.matkul"></td>
                 <td class="px-4 py-3">
                   <span class="px-2 py-0.5 rounded-full font-semibold text-[10px]"
-                        :class="h.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'"
+                        :class="h.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : (h.status === 'TEST_OK' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30')"
                         x-text="h.status"></span>
                 </td>
                 <td class="px-4 py-3 text-slate-400" x-text="h.message || '-'"></td>
@@ -279,6 +291,7 @@
   <!-- LOGIC SCRIPT -->
   <script>
     const FIREBASE_URL = "https://ethol-bot-default-rtdb.firebaseio.com";
+    const FONNTE_TOKEN = "wB7GEFCDTyDLpU2PjNPp";
 
     function app() {
       return {
@@ -287,6 +300,7 @@
         pinError: "",
         loading: false,
         actionLoading: false,
+        testingWaIndex: null,
         accounts: [],
         deviceStatus: {},
         history: [],
@@ -403,6 +417,58 @@
             });
           } catch (e) {
             alert("Gagal menyimpan perubahan ke Firebase!");
+          }
+        },
+
+        async testAccountWhatsApp(index) {
+          const acc = this.accounts[index];
+          if (!acc.wa_target) {
+            alert("Nomor WhatsApp belum diisi pada akun ini!");
+            return;
+          }
+
+          this.testingWaIndex = index;
+          const labelName = acc.name || acc.user.split("@")[0];
+          const nowWib = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+
+          const testMsg = `🔔 *Test Koneksi WhatsApp ETHOL Bot*\\n\\nHalo *${labelName}*!\\nKoneksi notifikasi WhatsApp ke nomor *${acc.wa_target}* aktif dan siap menerima notifikasi presensi otomatis.\\n\\n👤 *Akun SSO:* ${acc.user}\\n⏰ *Waktu Tes:* ${nowWib} WIB\\n\\n_Pesan otomatis dikirim langsung dari Dashboard HP._`;
+
+          try {
+            const res = await fetch("https://api.fonnte.com/send", {
+              method: "POST",
+              headers: {
+                "Authorization": FONNTE_TOKEN,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                target: acc.wa_target,
+                message: testMsg
+              })
+            });
+
+            const data = await res.json();
+            if (data.status === true) {
+              alert(`✅ Berhasil mengirim pesan test WhatsApp ke ${labelName} (${acc.wa_target})!`);
+
+              // Log ke Firebase history
+              await fetch(`${FIREBASE_URL}/history.json`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  matkul: "Test WhatsApp Connection",
+                  status: "TEST_OK",
+                  message: `Pesan uji coba terkirim ke ${labelName} (${acc.wa_target})`
+                })
+              });
+              await this.loadData();
+            } else {
+              alert(`❌ Fonnte Error: ${data.reason || data.message || "Gagal mengirim pesan"}`);
+            }
+          } catch (e) {
+            alert("❌ Gagal terhubung ke Fonnte API: " + e.message);
+          } finally {
+            this.testingWaIndex = null;
           }
         },
 
