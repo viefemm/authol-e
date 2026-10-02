@@ -321,17 +321,17 @@
                  class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
         </div>
         
-        <!-- Password SSO (Hanya tampil saat tambah akun baru) -->
-        <div x-show="!isEditing">
+        <!-- Password SSO (Dengan Show/Hide Toggle) -->
+        <div>
           <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
             <span>Password SSO</span>
-            <button type="button" @click="showNewPass = !showNewPass" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
-              <i class="fa-solid" :class="showNewPass ? 'fa-eye-slash' : 'fa-eye'"></i>
-              <span x-text="showNewPass ? 'Sembunyikan' : 'Tampilkan'"></span>
+            <button type="button" @click="showPass = !showPass" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
+              <i class="fa-solid" :class="showPass ? 'fa-eye-slash' : 'fa-eye'"></i>
+              <span x-text="showPass ? 'Sembunyikan' : 'Tampilkan'"></span>
             </button>
           </label>
           <div class="relative">
-            <input :type="showNewPass ? 'text' : 'password'" x-model="modalForm.pass" :required="!isEditing" placeholder="Password SSO ETHOL"
+            <input :type="showPass ? 'text' : 'password'" x-model="modalForm.pass" required placeholder="Password SSO ETHOL"
                    class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 pr-10" />
           </div>
         </div>
@@ -365,7 +365,7 @@
     </div>
   </div>
 
-  <!-- MODAL PENGATURAN TOKEN & PIN -->
+  <!-- MODAL PENGATURAN TOKEN & KONFIGURASI -->
   <div x-show="showConfigModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-4">
     <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full shadow-2xl space-y-4">
       <h3 class="text-lg font-bold text-white flex items-center gap-2">
@@ -374,21 +374,6 @@
       </h3>
       
       <form @submit.prevent="saveConfig()" class="space-y-3 text-xs">
-        <!-- Master PIN -->
-        <div>
-          <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
-            <span>Master PIN Login</span>
-            <button type="button" @click="showPin = !showPin" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
-              <i class="fa-solid" :class="showPin ? 'fa-eye-slash' : 'fa-eye'"></i>
-              <span x-text="showPin ? 'Sembunyikan' : 'Tampilkan'"></span>
-            </button>
-          </label>
-          <div class="relative">
-            <input :type="showPin ? 'text' : 'password'" x-model="configForm.master_pin" required placeholder="206265"
-                   class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono tracking-widest pr-10" />
-          </div>
-        </div>
-
         <!-- Fonnte Token -->
         <div>
           <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
@@ -462,10 +447,9 @@
         verifyingIndex: null,
         testingWa: false,
         testingTg: false,
-        showPin: false,
         showFonnteToken: false,
         showTgToken: false,
-        showNewPass: false,
+        showPass: false,
         _localAlertSent: false,
         accounts: [],
         deviceStatus: {},
@@ -476,7 +460,7 @@
         isEditing: false,
         editIndex: -1,
         modalForm: { name: "", user: "", pass: "", wa_target: "", tg_chat_id: "", is_active: true },
-        configForm: { master_pin: "206265", fonnte_token: "", telegram_bot_token: "", manual_kuliah_ids: "221835, 221847, 221839, 221840" },
+        configForm: { fonnte_token: "", telegram_bot_token: "", manual_kuliah_ids: "221835, 221847, 221839, 221840" },
 
         get lastSeenEpoch() {
           if (this.deviceStatus.last_seen_epoch) {
@@ -634,7 +618,7 @@
 
         openAddAccountModal() {
           this.isEditing = false;
-          this.showNewPass = false;
+          this.showPass = false;
           this.modalForm = { name: "", user: "", pass: "", wa_target: "", tg_chat_id: "", is_active: true };
           this.showModal = true;
         },
@@ -642,6 +626,7 @@
         openEditAccountModal(index) {
           this.isEditing = true;
           this.editIndex = index;
+          this.showPass = false;
           this.modalForm = { ...this.accounts[index] };
           this.showModal = true;
         },
@@ -654,12 +639,10 @@
             ids = "221835, 221847, 221839, 221840";
           }
           this.configForm = {
-            master_pin: this.config.master_pin || "206265",
             fonnte_token: this.config.fonnte_token || FONNTE_TOKEN,
             telegram_bot_token: this.config.telegram_bot_token || "",
             manual_kuliah_ids: ids
           };
-          this.showPin = false;
           this.showFonnteToken = false;
           this.showTgToken = false;
           this.showConfigModal = true;
@@ -674,7 +657,6 @@
               .filter(s => s.length > 0);
 
             const payload = {
-              master_pin: this.configForm.master_pin,
               fonnte_token: this.configForm.fonnte_token,
               telegram_bot_token: this.configForm.telegram_bot_token,
               manual_kuliah_ids: rawIds
@@ -695,11 +677,7 @@
 
         async saveAccount() {
           if (this.isEditing) {
-            const existingPass = this.accounts[this.editIndex].pass;
-            this.accounts[this.editIndex] = {
-              ...this.modalForm,
-              pass: existingPass // Pertahankan password lama
-            };
+            this.accounts[this.editIndex] = { ...this.modalForm };
           } else {
             this.accounts.push({ ...this.modalForm });
           }
