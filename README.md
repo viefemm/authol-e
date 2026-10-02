@@ -4,7 +4,6 @@ Sistem presensi otomatis ETHOL PENS cerdas dengan deteksi cepat (15s) via ESP32 
 
 ## 🌐 Web Dashboard (Mobile Friendly)
 - **URL Dashboard**: [https://viefemm.github.io/ethol-bot/](https://viefemm.github.io/ethol-bot/)
-- **Master PIN**: 206265
 
 ## 🚀 Fitur Utama
 - **Realtime State (<1s)**: Sinkronisasi status ESP32, toggle aktifasi akun mahasiswa, dan riwayat presensi langsung via Firebase Realtime Database.
