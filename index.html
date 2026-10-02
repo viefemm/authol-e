@@ -487,7 +487,7 @@
           const diffSeconds = nowEpoch - epoch;
 
           // Jika mati lebih dari 75 detik dan belum dikirim alert offline
-          if (diffSeconds > 75 && this.deviceStatus.offline_alert_sent === false) {
+          if (diffSeconds > 75 && !this.deviceStatus.offline_alert_sent) {
             console.warn("Watchdog: ESP32 Offline detected, sending alert to admin...");
             const alertMsg = `🔴 *PERINGATAN: ESP32 OFFLINE (MATI LAMPU / TERPUTUS)*\n\nHardware ESP32 tidak mengirim heartbeat selama >75 detik.\nKemungkinan terjadi *mati lampu di kos* atau *WiFi terputus*.\n\n⏰ *Terakhir Aktif:* ${this.deviceStatus.last_seen || '-'}\n📌 *Status Terakhir:* ${this.deviceStatus.last_status || '-'}\n📚 *Matkul Terakhir:* ${this.deviceStatus.last_checked_matkul || '-'}\n\n_Segera periksa daya listrik / koneksi WiFi di kos._`;
 
