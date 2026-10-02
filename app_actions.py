@@ -2,7 +2,8 @@
 ETHOL Presensi Bot - Cloud Parallel Worker
 Mengambil daftar akun aktif langsung dari Firebase Realtime Database,
 menjalankan presensi secara paralel, mencatat log ke Firebase,
-dan mengirimkan notifikasi multi-channel (WhatsApp via Fonnte & Telegram).
+mengirimkan notifikasi multi-channel (WhatsApp via Fonnte & Telegram),
+dan memantau kesehatan ESP32 (Cloud Watchdog).
 """
 
 import os
@@ -26,6 +27,7 @@ WIB = pytz.timezone("Asia/Jakarta")
 
 FIREBASE_URL       = os.environ.get("FIREBASE_URL", "https://ethol-bot-default-rtdb.firebaseio.com")
 FONNTE_TOKEN       = os.environ.get("FONNTE_TOKEN", "wB7GEFCDTyDLpU2PjNPp")
+ADMIN_WA           = os.environ.get("ADMIN_WA", "6285175062616")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 JAM_MULAI          = int(os.environ.get("JAM_MULAI", "6"))
 JAM_SELESAI        = int(os.environ.get("JAM_SELESAI", "21"))
@@ -114,6 +116,36 @@ def notify_client(acc: dict, message_wa: str, message_tg: str = ""):
         send_wa(wa, message_wa)
     if tg:
         send_telegram(tg, msg_tg)
+
+
+def check_esp32_offline_watchdog():
+    """Memeriksa apakah ESP32 offline (mati lampu / WiFi putus) dan memberi tahu Admin."""
+    try:
+        r = requests.get(f"{FIREBASE_URL}/device_status.json", timeout=10)
+        if r.status_code != 200:
+            return
+        dev = r.json() or {}
+        last_epoch = dev.get("last_seen_epoch", 0)
+        alert_sent = dev.get("offline_alert_sent", False)
+        now_epoch = int(time.time())
+
+        # Jika > 120 detik tidak ada heartbeat dan belum ada notif offline dikirim
+        if last_epoch and (now_epoch - last_epoch > 120) and not alert_sent:
+            logging.warning("⚠️ ESP32 terdeteksi OFFLINE! Mengirim notifikasi darurat ke Admin...")
+            msg = (
+                f"🔴 *PERINGATAN: ESP32 OFFLINE (MATI LAMPU / TERPUTUS)*\n\n"
+                f"Hardware ESP32 tidak mengirim heartbeat selama >2 menit.\n"
+                f"Kemungkinan terjadi *mati lampu di kos* atau *WiFi terputus*.\n\n"
+                f"⏰ *Terakhir Aktif:* {dev.get('last_seen', '-')}\n"
+                f"📌 *Status Terakhir:* {dev.get('last_status', '-')}\n"
+                f"📚 *Matkul Terakhir:* {dev.get('last_checked_matkul', '-')}\n\n"
+                f"_Notifikasi otomatis dari Cloud Watchdog._"
+            )
+            send_wa(ADMIN_WA, msg)
+            requests.put(f"{FIREBASE_URL}/device_status/offline_alert_sent.json", json=True, timeout=10)
+            log_to_firebase("ESP32 Watchdog", "OFFLINE_ALERT", "Notifikasi ESP32 mati dikirim ke Admin")
+    except Exception as e:
+        logging.error(f"Error checking ESP32 health watchdog: {e}")
 
 
 def get_active_accounts():
@@ -360,6 +392,10 @@ def run_worker(config):
 
 
 def main():
+    # 1. Jalankan Cloud Watchdog untuk kesehatan ESP32
+    check_esp32_offline_watchdog()
+
+    # 2. Proses presensi multi-akun aktif
     accounts = get_active_accounts()
     if not accounts:
         logging.warning("Tidak ada akun aktif di Firebase / ACCOUNTS_JSON!")
