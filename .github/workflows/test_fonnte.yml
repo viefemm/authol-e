@@ -1,0 +1,36 @@
+name: Test Koneksi Fonnte (Manual)
+
+on:
+  workflow_dispatch:  # Hanya dijalankan secara manual oleh user, TIDAK ada cronjob
+
+jobs:
+  test_fonnte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pytz
+
+      - name: Jalankan Test Koneksi Fonnte
+        env:
+          FONNTE_TOKEN: ${{ secrets.FONNTE_TOKEN }}
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+        run: |
+          python test_fonnte.py 2>&1 | tee test_fonnte_log.txt
+
+      - name: Upload Log Pengujian (.txt)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-test-fonnte
+          path: test_fonnte_log.txt
+          retention-days: 7
