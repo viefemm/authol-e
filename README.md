@@ -1,135 +1,165 @@
-# ⚡ Authol-E (Automated Academic Telemetry & Session Orchestrator)
+# ⚡ Authol-E
 
-> **Hybrid IoT Scout & Serverless Cloud Orchestrator for ETHOL PENS**  
-> *Sistem Pemantauan Sesi Akademik Cerdas, Sinkronisasi Status Multi-Akun Terdistribusi, dan Multi-Channel Notification Gateway.*
+> **Hybrid IoT & Serverless Academic Telemetry Orchestrator for ETHOL PENS**  
+> *A high-reliability, event-driven session monitor, multi-student state synchronizer, and multi-channel notification dispatcher.*
 
----
-
-## 🧭 Ikhtisar Sistem
-
-**Authol-E** adalah platform otomasi dan telemetri akademik berbasis arsitektur **Hybrid (Microcontroller IoT + Realtime Cloud State + Serverless Event-Driven Workers)** yang dirancang untuk mengintegrasikan ekosistem pembelajaran digital kampus (*Electronic Teaching Online Learning / ETHOL PENS*).
-
-Sistem ini bekerja secara otomatis untuk mendeteksi pembukaan sesi perkuliahan secara *realtime* (< 15 detik), melakukan validasi tiket autentikasi SSO CAS PENS, menyinkronkan status partisipasi perkuliahan bagi banyak akun mahasiswa secara paralel (*multi-tenant*), serta mendistribusikan laporan aktivitas langsung ke kanal komunikasi personal (WhatsApp & Telegram).
+[![Architecture](https://img.shields.io/badge/Architecture-Hybrid%20IoT%20%2B%20Serverless-indigo?style=flat-square)]()
+[![Hardware](https://img.shields.io/badge/Hardware-ESP32%20PlatformIO-blue?style=flat-square)]()
+[![Cloud Worker](https://img.shields.io/badge/Cloud%20Worker-GitHub%20Actions%20Python-emerald?style=flat-square)]()
+[![State Database](https://img.shields.io/badge/State%20Database-Firebase%20RTDB-amber?style=flat-square)]()
+[![Notification Channels](https://img.shields.io/badge/Notifications-WhatsApp%20%7C%20Telegram-25D366?style=flat-square)]()
 
 ---
 
-## 🏗️ Arsitektur Sistem (Hybrid Infrastructure)
+## 🧭 System Overview
+
+**Authol-E** is an enterprise-grade academic automation and telemetry orchestration platform built on a **Hybrid Infrastructure (IoT Microcontroller + Realtime Cloud State + Serverless Event-Driven Runners)**. It seamlessly interfaces with the campus digital learning ecosystem (*Electronic Teaching Online Learning / ETHOL PENS*).
+
+The system operates with near-zero latency (< 15 seconds detection window), automatically authenticates against university CAS SSO gateways, synchronizes active lecture session participation across multiple student accounts concurrently (*multi-tenant*), and dispatches real-time diagnostics directly to student communication channels (WhatsApp and Telegram).
+
+---
+
+## 🏗️ System Architecture
 
 ```text
-[ETHOL Lecture Session Opened]
-               │
-               ▼
-[ESP32 Hardware Scout (Kos/Home IoT)]
-  - Low-power background watcher (15s polling window)
-  - RTC-guarded hardware state tracking
-  - Instant Event Detection -> Dispatch Webhook
-               │
-               ▼
-[Realtime Telemetry & State Hub (Firebase RTDB)]
-  - Master PIN Security Layer & Account Registry
-  - Live Heartbeat Timestamp & Power/Network Watchdog
-  - Dynamic Kloter & Shift Course Filter
-               │
-               ▼
-[Serverless Cloud Worker (GitHub Actions On-Demand)]
-  - Ephemeral Multi-Threaded Execution (< 3 detik)
-  - Isolated CAS SSO Cookie Jars (Zero Token Leakage)
-  - Automated Session Participation & Pre-check
-               │
-               ▼
-[Multi-Channel Notification Gateway]
-  - WhatsApp Delivery Engine (via Fonnte Gateway)
-  - Telegram Interactive Notification Bot
-  - Zero Fail-Silent Logging & Error Reporting
+[ETHOL Lecture Session Opened by Lecturer]
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────┐
+│           ESP32 HARDWARE SCOUT (Campus / Home IoT)      │
+│  - Low-power continuous watcher (15s polling window)    │
+│  - Hardware RTC-guarded state debounce lock             │
+│  - Instant Session Open Detection -> GitHub API Dispatch│
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│        REALTIME TELEMETRY & STATE HUB (Firebase RTDB)   │
+│  - Master PIN Security & Centralized Student Registry   │
+│  - Live Epoch Heartbeat & Power/Network Watchdog        │
+│  - Dynamic 2-Week Kloter / Lab Shift Course Overrides   │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│       SERVERLESS CLOUD WORKER (GitHub Actions Parallel) │
+│  - Ephemeral Multi-Threaded Execution (< 3 seconds)     │
+│  - Isolated Cookie Jars (Zero Cross-Account Leakage)    │
+│  - Automated Session Verification & Check-in Pipeline   │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│          MULTI-CHANNEL NOTIFICATION GATEWAY             │
+│  - WhatsApp Instant Delivery Engine (Fonnte API)        │
+│  - Interactive Telegram Alert Bot                       │
+│  - Zero Fail-Silent Logging & Incident Telemetry        │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## ✨ Fitur-Fitur Utama
+## ✨ Key Features
 
 ### 1. ⚡ 100% Event-Driven On-Demand Execution
-- **Bukan Scheduled Cron:** Sistem tidak membuang kuota komputasi atau membanjiri server kampus dengan polling terjadwal setiap 5 menit.
-- **Microsecond Triggering:** Begitu sensor IoT mendeteksi sesi kuliah dibuka oleh dosen, komputasi *serverless* langsung dipicu secara instan.
+- **No Inefficient Cron Jobs:** Unlike traditional 5-minute cron schedules that waste compute and risk server rate-limiting, Authol-E executes purely on-demand.
+- **Sub-Second Cloud Triggering:** The moment the hardware scout detects an open session, GitHub Actions is triggered via Repository Dispatch within milliseconds.
 
 ### 2. 🛡️ Zero Fail-Silent Architecture
-- Setiap tahapan siklus verifikasi (Autentikasi MIS CAS, Validasi Token SSO ETHOL, Ketersediaan Kunci Sesi, hingga Respon Server) diawasi secara ketat.
-- Jika terjadi anomali (misalnya password mahasiswa kedaluwarsa atau server kampus *down*), sistem langsung mengirimkan notifikasi darurat secara proaktif agar mahasiswa dapat segera mengambil tindakan manual.
+- Every phase of the authentication and submission lifecycle (MIS CAS CAS-Redirect, ETHOL SSO Token Validation, Session Key Availability, and Server Responses) is guarded.
+- Any anomaly (e.g. invalid student password, expired SSO ticket, or server downtime) triggers an immediate emergency alert to the affected student so they can take manual action.
 
 ### 3. 🔌 Power & Network Outage Watchdog
-- **Hardware Boot Telemetry:** Mengirimkan notifikasi WhatsApp saat perangkat ESP32 baru saja menyala (*Power On* / Listrik kembali aktif).
-- **Offline Health Monitor:** Mendeteksi jika perangkat keras kehilangan daya (mati lampu di kos) atau terputus dari WiFi selama > 2 menit dan secara otomatis mengirimkan peringatan ke administrator.
-- **Anti-Duplicate Hardware Lock:** Menggunakan *RTC Memory Controller* untuk mencegah pengiriman pesan ganda saat terjadi *warm-reboot* atau koneksi serial.
+- **Hardware Boot Telemetry:** Sends an instant WhatsApp alert to the administrator when the ESP32 powers on (*e.g. power restored*).
+- **Offline Health Monitor:** Actively detects power outages or Wi-Fi disconnection exceeding 2 minutes, dispatching an automated alert to the admin.
+- **Anti-Duplicate Debounce Lock:** Utilizes non-volatile `RTC_DATA_ATTR` memory on the ESP32 to prevent duplicate boot messages during warm resets or serial DTR pulses.
 
 ### 4. 🔬 Smart Course Routing & Manual Session Safety
-- **Kloter / Shift Filter:** Menyediakan filter khusus untuk mata kuliah laboratorium sistem 2 mingguan (kloter/shift) agar tidak melakukan sinkronisasi otomatis di luar giliran jadwal mahasiswa.
-- **Duplicate Presence Detection:** Jika mahasiswa telah melakukan *check-in* secara manual di kelas, sistem mendeteksinya secara cerdas dan memberikan status informasi tanpa memicu pesan kesalahan.
+- **2-Week Shift / Kloter Filter:** Identifies bi-weekly lab courses and suppresses automated submission, sending a reminder for manual attendance only when it matches the student's scheduled shift.
+- **Manual Attendance Detection:** If a student already attended the lecture manually, the system detects the response and records it as an informational notice rather than an error.
 
 ### 5. 📱 Responsive Web Management Console
-- Dashboard antarmuka web modern (*Tailwind CSS + Alpine.js*) terproteksi Master PIN.
-- Pemantauan status kesehatan perangkat keras secara langsung (*Live Heartbeat Epoch < 70s*).
-- Fitur **"Cek ETHOL"** untuk profiling instan (mengekstrak Nama Resmi & NRP mahasiswa langsung dari SSO CAS PENS).
-- Tombol uji coba koneksi gateway WhatsApp dan Telegram secara interaktif.
+- Modern, PIN-protected web console built with **Tailwind CSS + Alpine.js**.
+- Live hardware telemetry monitor with sub-70s epoch health indicators.
+- **"Verify ETHOL"** tool for real-time profiling (fetching student official names & NRP numbers directly from CAS SSO).
+- Interactive multi-channel testing buttons for WhatsApp and Telegram gateways.
 
 ---
 
-## 📂 Struktur Repositori
+## 📂 Repository Structure
 
 ```text
 authol-e/
 ├── .github/
 │   └── workflows/
-│       └── presensi.yml          # GitHub Actions On-Demand Workflow & Verifier
+│       └── presensi.yml          # On-Demand Serverless Workflow & Verifier
 ├── cloud-worker/
 │   ├── app_actions.py            # Parallel Cloud Worker & Verification Engine
 │   ├── app.py                    # Standalone Local Python Worker (Optional)
-│   └── requirements.txt          # Dependensi Python Runtime
+│   └── requirements.txt          # Python Runtime Dependencies
 ├── dashboard/
-│   └── index.html                # Web Management Console (Mobile-Optimized)
+│   └── index.html                # Responsive Web Console (Mobile-Optimized)
 ├── firmware-esp32/
-│   ├── platformio.ini            # Konfigurasi PlatformIO & Dependencies
+│   ├── platformio.ini            # PlatformIO Configuration & Lib Dependencies
 │   ├── src/
 │   │   └── main.cpp              # IoT Scout Firmware (Hardware Event Detector)
-│   └── lib/                      # Arsitektur Modular Drivers & Domain Services
-├── firebase_schema.json          # Template Database Realtime Firebase
-└── README.md                     # Dokumentasi Sistem
+│   └── lib/                      # Modular Drivers & Domain Services
+├── firebase_schema.json          # Pre-configured Realtime Database Schema
+└── README.md                     # System Documentation
 ```
 
 ---
 
-## ⚙️ Panduan Konfigurasi Singkat
+## ⚙️ Quick Start & Configuration
 
-### 1. Database State (Firebase Realtime Database)
-1. Buat project baru di [Firebase Console](https://console.firebase.google.com/) dan aktifkan **Realtime Database**.
-2. Impor struktur schema awal dari file `firebase_schema.json`.
+### 1. Database Setup (Firebase Realtime Database)
+1. Create a project in the [Firebase Console](https://console.firebase.google.com/) and enable **Realtime Database**.
+2. Set security rules to allow read/write access.
+3. Import the default database structure from `firebase_schema.json`.
 
 ### 2. GitHub Secrets Configuration
-Pada repositori GitHub, masuk ke **Settings** ➔ **Secrets and variables** ➔ **Actions**, lalu daftarkan kredensial berikut:
+In your GitHub repository, navigate to **Settings** ➔ **Secrets and variables** ➔ **Actions**, then add the following secrets:
 
-| Nama Secret | Deskripsi |
+| Secret Name | Description |
 |---|---|
-| `FIREBASE_URL` | URL endpoint Firebase Realtime Database Anda |
-| `FONNTE_TOKEN` | Token API gateway WhatsApp dari [Fonnte](https://fonnte.com) |
-| `ADMIN_WA` | Nomor WhatsApp tujuan notifikasi telemetri / status perangkat |
-| `TELEGRAM_BOT_TOKEN` | (Opsional) Token bot Telegram dari [@BotFather](https://t.me/BotFather) |
+| `FIREBASE_URL` | Your Firebase Realtime Database URL (`https://<project>-default-rtdb.firebaseio.com`) |
+| `FONNTE_TOKEN` | API Token from your [Fonnte Dashboard](https://fonnte.com) |
+| `ADMIN_WA` | Administrator WhatsApp number for hardware health alerts (`628...`) |
+| `TELEGRAM_BOT_TOKEN` | (Optional) Telegram Bot token from [@BotFather](https://t.me/BotFather) |
 
-### 3. IoT Scout Firmware (ESP32)
-1. Buka direktori `firmware-esp32/` menggunakan **PlatformIO IDE**.
-2. Sesuaikan konfigurasi SSID WiFi, akun pemantau sesi, dan endpoint Firebase pada `src/main.cpp`.
-3. Lakukan build dan flash ke modul ESP32 Anda:
+*(Student accounts and configuration are fetched dynamically from Firebase at runtime).*
+
+### 3. Flash ESP32 Hardware Scout
+1. Open `firmware-esp32/` using **VS Code** with the **PlatformIO IDE** extension.
+2. Edit `firmware-esp32/src/main.cpp` and update the `Config` namespace:
+   ```cpp
+   namespace Config {
+     const char *kWifiSsid    = "YOUR_WIFI_SSID";
+     const char *kWifiPass    = "YOUR_WIFI_PASSWORD";
+     const char *kScoutUser   = "your_email@student.pens.ac.id";
+     const char *kScoutPass   = "YOUR_CAS_SSO_PASSWORD";
+     const char *kAdminWa     = "628xxxxxxxxxx";
+     const char *kFonnteToken = "YOUR_FONNTE_TOKEN";
+     const char *kFirebaseUrl = "https://YOUR_PROJECT-default-rtdb.firebaseio.com";
+     const char *kGitHubRepo  = "USERNAME/authol-e";
+     const char *kGitHubToken = "ghp_YOUR_PERSONAL_ACCESS_TOKEN";
+   }
+   ```
+3. Connect your ESP32 via USB and upload the firmware:
    ```bash
    pio run --target upload
    ```
 
 ---
 
-## 🔒 Privasi & Keamanan Sesi
+## 🔒 Security & Session Privacy
 
-- **Session Isolation:** Setiap akun dieksekusi dalam *cookie jar session* terisolasi secara mandiri pada memori runtime terpisah (*ephemeral container*).
-- **Zero Local Plaintext Tokens:** Token sesi dan kredensial diproses secara terenkripsi saat transit (*TLS/HTTPS*) dan dimusnahkan segera setelah siklus eksekusi selesai.
-- **Master PIN Gate:** Akses kontrol web console dilindungi oleh verifikasi PIN terenkripsi pada level database.
+- **Session Isolation:** Each student account operates within an independent `requests.Session()` cookie jar, preventing cross-tenant data contamination.
+- **Ephemeral Runners:** Cloud workers run in short-lived Ubuntu containers where all memory and session states are wiped immediately upon completion.
+- **Masked Credentials:** Web management console obscures passwords and API tokens by default with interactive reveal toggles.
 
 ---
 
 ## 📜 Disclaimer & Ethical Notice
 
-Proyek **Authol-E** dikembangkan murni sebagai bahan riset dan demonstrasi integrasi arsitektur **Internet of Things (IoT)**, orkestrasi komputasi *serverless event-driven*, serta implementasi sistem notifikasi telemetri terdistribusi. Segala penggunaan sistem diharapkan tetap mematuhi peraturan dan etika akademik yang berlaku di lingkungan institusi.
+**Authol-E** was developed for educational and research purposes to demonstrate modern **IoT Hardware Telemetry**, **Serverless Event-Driven Orchestration**, and **Distributed Multi-Channel Alert Systems**. Users are responsible for adhering to institutional policies regarding automated digital interaction.
