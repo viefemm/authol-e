@@ -1,7 +1,8 @@
 """
-ETHOL Presensi Bot - Mode GitHub Actions (Single Run)
-Script ini dirancang untuk dijalankan sekali per eksekusi (tidak loop).
-GitHub Actions akan memanggil script ini setiap 5 menit via cron.
+ETHOL Presensi Bot - Cloud Parallel Worker
+Mengambil daftar akun aktif langsung dari Firebase Realtime Database,
+menjalankan presensi secara paralel, mencatat log ke Firebase,
+dan mengirimkan notifikasi WhatsApp via Fonnte.
 """
 
 import os
@@ -23,11 +24,10 @@ logging.basicConfig(
 
 WIB = pytz.timezone("Asia/Jakarta")
 
-FONNTE_TOKEN  = os.environ.get("FONNTE_TOKEN", "")
-ACCOUNTS_JSON = os.environ.get("ACCOUNTS_JSON", "[]")
-ACCOUNTS      = json.loads(ACCOUNTS_JSON)
-JAM_MULAI     = int(os.environ.get("JAM_MULAI", "6"))
-JAM_SELESAI   = int(os.environ.get("JAM_SELESAI", "21"))
+FIREBASE_URL = os.environ.get("FIREBASE_URL", "https://ethol-bot-default-rtdb.firebaseio.com")
+FONNTE_TOKEN = os.environ.get("FONNTE_TOKEN", "wB7GEFCDTyDLpU2PjNPp")
+JAM_MULAI    = int(os.environ.get("JAM_MULAI", "6"))
+JAM_SELESAI  = int(os.environ.get("JAM_SELESAI", "21"))
 
 
 def now_wib() -> datetime:
@@ -42,6 +42,20 @@ def timestamp_str() -> str:
 
 def date_stamp() -> str:
     return now_wib().strftime("%Y%m%d")
+
+def log_to_firebase(matkul: str, status: str, message: str):
+    """Mencatat aktivitas presensi ke Firebase Realtime Database."""
+    try:
+        payload = {
+            "timestamp": now_wib().strftime("%Y-%m-%d %H:%M:%S"),
+            "matkul": matkul,
+            "status": status,
+            "message": message
+        }
+        # Gunakan POST agar otomatis membuat unique ID di /history
+        requests.post(f"{FIREBASE_URL}/history.json", json=payload, timeout=10)
+    except Exception as e:
+        logging.getLogger("FIREBASE").error(f"Gagal simpan log ke Firebase: {e}")
 
 def send_wa(target: str, message: str) -> bool:
     if not FONNTE_TOKEN or not target:
@@ -61,15 +75,40 @@ def send_wa(target: str, message: str) -> bool:
         return False
 
 
+def get_active_accounts():
+    """Mengambil daftar akun aktif dari Firebase."""
+    try:
+        r = requests.get(f"{FIREBASE_URL}/accounts.json", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            raw_list = data if isinstance(data, list) else (list(data.values()) if isinstance(data, dict) else [])
+            active_list = [acc for acc in raw_list if acc.get("is_active") is True]
+            if active_list:
+                logging.info(f"Berhasil fetch {len(active_list)} akun aktif dari Firebase.")
+                return active_list
+    except Exception as e:
+        logging.error(f"Gagal fetch akun dari Firebase: {e}")
+
+    # Fallback ke Environment Variable ACCOUNTS_JSON
+    fallback_json = os.environ.get("ACCOUNTS_JSON", "[]")
+    try:
+        raw = json.loads(fallback_json)
+        return [a for a in raw if a.get("is_active", True)]
+    except Exception:
+        return []
+
+
 class AccountWorker:
     def __init__(self, config: dict):
         self.user       = config["user"]
         self.password   = config["pass"]
         self.wa_target  = config.get("wa_target", "")
-        self.label      = self.user.split("@")[0]
+        self.name       = config.get("name", self.user.split("@")[0])
+        self.label      = self.name
         self.log        = logging.getLogger(self.label)
         self.session    = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0 (EtholBot/2.0)"})
+        self.student_number = ""
 
     def _mis_login(self) -> bool:
         self.log.info("Login MIS CAS...")
@@ -174,24 +213,23 @@ class AccountWorker:
             return False
 
     def run_once(self):
-        """Jalankan satu siklus cek presensi (untuk GitHub Actions)."""
+        """Jalankan satu siklus cek dan submit presensi."""
         self.student_number = ""
 
         if not self._mis_login():
-            self.log.error("Login MIS gagal, skip akun ini")
+            self.log.error("Login MIS gagal, lewati akun ini")
             return
         if not self._ethol_sso():
-            self.log.error("SSO ETHOL gagal, skip akun ini")
+            self.log.error("SSO ETHOL gagal, lewati akun ini")
             return
 
-        ds = date_stamp()
         try:
             rn = self.session.get(
                 "https://ethol.pens.ac.id/api/notifikasi/mahasiswa?filterNotif=PRESENSI",
                 timeout=15
             )
             if rn.status_code != 200:
-                self.log.info(f"Notif HTTP {rn.status_code}, skip")
+                self.log.info(f"Notif HTTP {rn.status_code}, lewati")
                 return
 
             data_list = rn.json()
@@ -199,9 +237,8 @@ class AccountWorker:
                 self.log.info("Tidak ada notifikasi presensi")
                 return
 
-            notif    = data_list[0]
-            id_notif = str(notif.get("idNotifikasi", ""))
-            ket      = notif.get("keterangan", "")
+            notif = data_list[0]
+            ket   = notif.get("keterangan", "")
 
             if "Dosen telah membuka presensi" not in ket:
                 self.log.info("Tidak ada presensi yang dibuka")
@@ -225,7 +262,6 @@ class AccountWorker:
                 return
 
             aktif_raw = ra.json()
-            # Response bisa berupa dict atau list of dict
             if isinstance(aktif_raw, list):
                 aktif_data = aktif_raw[0] if aktif_raw else {}
             else:
@@ -244,8 +280,8 @@ class AccountWorker:
                 "mahasiswa": int(self.student_number),
                 "key": key, "kuliah_asal": int(kuliah)
             }
-            rs     = self.session.post("https://ethol.pens.ac.id/api/presensi/mahasiswa",
-                                       json=payload, timeout=15)
+            rs      = self.session.post("https://ethol.pens.ac.id/api/presensi/mahasiswa",
+                                        json=payload, timeout=15)
             rs_data = rs.json() if "application/json" in rs.headers.get("content-type","") else {}
             sukses  = rs.status_code == 200 and rs_data.get("sukses") is True
             pesan   = rs_data.get("pesan", "")
@@ -254,19 +290,21 @@ class AccountWorker:
             self.log.info(f"Submit HTTP {rs.status_code} sukses={sukses} pesan={pesan}")
 
             if sukses:
+                log_to_firebase(matkul, "SUCCESS", f"Presensi berhasil untuk {self.label}")
                 send_wa(self.wa_target, (
-                    f"✅ *Presensi Berhasil!*\n\n"
-                    f"👤 *Akun:* {self.label}\n"
-                    f"📚 *Mata Kuliah:* {matkul}\n"
-                    f"⏰ *Waktu:* {when}\n\n"
+                    f"✅ *Presensi Berhasil!*\\n\\n"
+                    f"👤 *Akun:* {self.label}\\n"
+                    f"📚 *Mata Kuliah:* {matkul}\\n"
+                    f"⏰ *Waktu:* {when}\\n\\n"
                     f"_Presensi otomatis via ETHOL Bot._"
                 ))
             else:
+                log_to_firebase(matkul, "FAILED", f"Gagal presensi {self.label}: {pesan}")
                 send_wa(self.wa_target, (
-                    f"⚠️ *Gagal Presensi Otomatis*\n\n"
-                    f"👤 *Akun:* {self.label}\n"
-                    f"📚 *Mata Kuliah:* {matkul}\n"
-                    f"⏰ *Waktu:* {when}\n\n"
+                    f"⚠️ *Gagal Presensi Otomatis*\\n\\n"
+                    f"👤 *Akun:* {self.label}\\n"
+                    f"📚 *Mata Kuliah:* {matkul}\\n"
+                    f"⏰ *Waktu:* {when}\\n\\n"
                     f"_{pesan or 'server tidak memberi pesan'} — segera presensi manual._"
                 ))
         except Exception as e:
@@ -278,27 +316,25 @@ def run_worker(config):
 
 
 def main():
-    if not in_window():
-        logging.info(f"Di luar jadwal ({now_wib().strftime('%A %H:%M WIB')}), tidak ada yang dilakukan.")
+    # Cek apakah manual trigger atau schedule
+    accounts = get_active_accounts()
+    if not accounts:
+        logging.warning("Tidak ada akun aktif di Firebase / ACCOUNTS_JSON!")
         return
 
-    if not ACCOUNTS:
-        logging.error("ACCOUNTS_JSON kosong!")
-        return
-
-    logging.info(f"=== ETHOL Bot - {len(ACCOUNTS)} akun | {now_wib().strftime('%d-%m-%Y %H:%M WIB')} ===")
+    logging.info(f"=== ETHOL Cloud Worker - {len(accounts)} Akun Aktif | {now_wib().strftime('%d-%m-%Y %H:%M WIB')} ===")
 
     threads = []
-    for i, acc in enumerate(ACCOUNTS):
-        t = threading.Thread(target=run_worker, args=(acc,), name=acc["user"].split("@")[0])
+    for acc in accounts:
+        t = threading.Thread(target=run_worker, args=(acc,), name=acc.get("name", acc["user"].split("@")[0]))
         t.start()
         threads.append(t)
-        time.sleep(3)  # stagger 3 detik antar akun
+        time.sleep(2)  # stagger 2 detik antar akun
 
     for t in threads:
         t.join(timeout=120)
 
-    logging.info("=== Selesai ===")
+    logging.info("=== Semua Akun Selesai Diproses ===")
 
 
 if __name__ == "__main__":
