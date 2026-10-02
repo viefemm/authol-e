@@ -103,7 +103,7 @@
             <span x-text="isEspOnline ? 'ONLINE' : 'OFFLINE'"></span>
           </span>
         </div>
-        <p class="text-lg font-bold text-white truncate" x-text="isEspOnline ? (deviceStatus.last_checked_matkul || 'Standby') : 'Hardware Terputus'"></p>
+        <p class="text-lg font-bold text-white truncate" x-text="isEspOnline ? (deviceStatus.last_checked_matkul || 'Standby') : 'Hardware Offline / Mati'"></p>
         <p class="text-xs text-slate-500 mt-1" x-text="pingStatusText"></p>
       </div>
 
@@ -172,7 +172,7 @@
                         class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
                         :class="acc.is_active ? 'bg-indigo-600' : 'bg-slate-700'">
                   <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"
-                        :class="acc.is_active ? 'translate-x-5' : 'translate-x-0'\"></span>
+                        :class="acc.is_active ? 'translate-x-5' : 'translate-x-0'"></span>
                 </button>
               </div>
 
@@ -384,18 +384,32 @@
         modalForm: { name: "", user: "", pass: "", wa_target: "", tg_chat_id: "", is_active: true },
         configForm: { master_pin: "206265", telegram_bot_token: "" },
 
+        get lastSeenEpoch() {
+          if (this.deviceStatus.last_seen_epoch) {
+            return Number(this.deviceStatus.last_seen_epoch);
+          }
+          if (this.deviceStatus.last_seen && typeof this.deviceStatus.last_seen === 'string' && this.deviceStatus.last_seen.includes('-')) {
+            const raw = this.deviceStatus.last_seen.replace(' WIB', '').trim();
+            const parsed = new Date(raw.replace(' ', 'T') + '+07:00').getTime();
+            if (!isNaN(parsed)) return Math.floor(parsed / 1000);
+          }
+          return 0;
+        },
+
         get isEspOnline() {
-          if (!this.deviceStatus.last_seen_epoch) return false;
+          const epoch = this.lastSeenEpoch;
+          if (!epoch) return false;
           const nowEpoch = Math.floor(Date.now() / 1000);
-          const diffSeconds = nowEpoch - Number(this.deviceStatus.last_seen_epoch);
+          const diffSeconds = nowEpoch - epoch;
           // Toleransi 70 detik (ESP32 heartbeat setiap 30 detik)
           return diffSeconds >= 0 && diffSeconds < 70;
         },
 
         get pingStatusText() {
-          if (!this.deviceStatus.last_seen_epoch) return "Ping: Belum pernah tersambung";
+          const epoch = this.lastSeenEpoch;
+          if (!epoch) return "Ping: Belum pernah tersambung";
           const nowEpoch = Math.floor(Date.now() / 1000);
-          const diffSeconds = Math.max(0, nowEpoch - Number(this.deviceStatus.last_seen_epoch));
+          const diffSeconds = Math.max(0, nowEpoch - epoch);
           if (diffSeconds < 60) return `Ping: ${diffSeconds} detik lalu`;
           if (diffSeconds < 3600) return `Offline sejak: ${Math.floor(diffSeconds / 60)} menit lalu`;
           return `Offline sejak: ${Math.floor(diffSeconds / 3600)} jam lalu`;
@@ -467,9 +481,10 @@
         },
 
         async checkWatchdogAlert() {
-          if (!this.deviceStatus.last_seen_epoch) return;
+          const epoch = this.lastSeenEpoch;
+          if (!epoch) return;
           const nowEpoch = Math.floor(Date.now() / 1000);
-          const diffSeconds = nowEpoch - Number(this.deviceStatus.last_seen_epoch);
+          const diffSeconds = nowEpoch - epoch;
 
           // Jika mati lebih dari 75 detik dan belum dikirim alert offline
           if (diffSeconds > 75 && this.deviceStatus.offline_alert_sent === false) {
