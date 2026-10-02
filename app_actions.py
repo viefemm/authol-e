@@ -224,7 +224,13 @@ class AccountWorker:
             if ra.status_code != 200:
                 return
 
-            aktif_data = ra.json()
+            aktif_raw = ra.json()
+            # Response bisa berupa dict atau list of dict
+            if isinstance(aktif_raw, list):
+                aktif_data = aktif_raw[0] if aktif_raw else {}
+            else:
+                aktif_data = aktif_raw
+
             if aktif_data.get("open") != 1:
                 self.log.info("Presensi belum aktif (LOCKED)")
                 return
