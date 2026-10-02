@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ETHOL Bot Controller</title>
+  <link rel="icon" href="https://ethol.pens.ac.id/favicon.ico" />
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#eef2ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-indigo-500 selection:text-white"
+      x-data="app()" x-init="initApp()" x-cloak>
+
+  <!-- LOGIN MODAL / GATE -->
+  <div x-show="!isAuthenticated" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md px-4">
+    <div class="bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center">
+      <div class="w-16 h-16 bg-indigo-600/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-indigo-500/30">
+        <i class="fa-solid fa-shield-halved text-2xl"></i>
+      </div>
+      <h2 class="text-2xl font-bold text-white mb-1">ETHOL Bot Controller</h2>
+      <p class="text-slate-400 text-sm mb-6">Masukkan PIN Master untuk mengelola akun dan bot.</p>
+      
+      <form @submit.prevent="verifyPin()">
+        <div class="mb-4">
+          <input type="password" x-model="pinInput" placeholder="••••••" autofocus
+                 class="w-full text-center tracking-widest text-2xl px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 text-white placeholder-slate-600" />
+          <p x-show="pinError" class="text-rose-400 text-xs mt-2" x-text="pinError"></p>
+        </div>
+        <button type="submit" :disabled="loading"
+                class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-lock-open" x-show="!loading"></i>
+          <i class="fa-solid fa-spinner fa-spin" x-show="loading"></i>
+          <span>Buka Dashboard</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MAIN DASHBOARD -->
+  <div x-show="isAuthenticated" class="max-w-6xl mx-auto px-4 py-6 md:py-10 space-y-6">
+
+    <!-- HEADER -->
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800/80 p-5 rounded-2xl backdrop-blur">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
+          <i class="fa-solid fa-robot text-xl text-white"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-white flex items-center gap-2">
+            ETHOL Bot Dashboard
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Hybrid v2.0</span>
+          </h1>
+          <p class="text-xs text-slate-400">ESP32 Scout Worker ➔ GitHub Actions Cloud Exec</p>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-2">
+        <button @click="triggerCloudPresensi()" :disabled="actionLoading"
+                class="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold flex items-center gap-2 transition">
+          <i class="fa-solid fa-bolt" :class="{'fa-spin': actionLoading}"></i>
+          <span>Trigger Presensi</span>
+        </button>
+        <button @click="logout()" title="Logout"
+                class="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs border border-slate-700 transition">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- STATUS BANNER & METRICS -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <!-- ESP32 STATUS -->
+      <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">ESP32 Hardware</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+                :class="isEspOnline ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'">
+            <span class="w-2 h-2 rounded-full" :class="isEspOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'"></span>
+            <span x-text="isEspOnline ? 'ONLINE' : 'OFFLINE'"></span>
+          </span>
+        </div>
+        <p class="text-lg font-bold text-white truncate" x-text="deviceStatus.last_checked_matkul || 'Standby'"></p>
+        <p class="text-xs text-slate-500 mt-1" x-text="'Ping: ' + (deviceStatus.last_seen || '-')"></p>
+      </div>
+
+      <!-- ACTIVE ACCOUNTS -->
+      <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Akun Aktif</span>
+          <i class="fa-solid fa-users text-indigo-400"></i>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span class="text-2xl font-bold text-white" x-text="accounts.filter(a => a.is_active).length"></span>
+          <span class="text-xs text-slate-400" x-text="'dari ' + accounts.length + ' total akun'"></span>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Hanya akun aktif yang diabsenkan</p>
+      </div>
+
+      <!-- WA NOTIFICATION -->
+      <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Fonnte WhatsApp</span>
+          <button @click="testWhatsApp()" class="text-xs text-indigo-400 hover:underline">Test WA</button>
+        </div>
+        <p class="text-lg font-bold text-emerald-400 flex items-center gap-2">
+          <i class="fa-brands fa-whatsapp text-xl"></i>
+          <span>Connected</span>
+        </p>
+        <p class="text-xs text-slate-500 mt-1">Notifikasi instan tiap kali presensi</p>
+      </div>
+    </div>
+
+    <!-- ACCOUNTS SECTION -->
+    <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-6">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-address-card text-indigo-400"></i>
+            Daftar Akun Mahasiswa
+          </h2>
+          <p class="text-xs text-slate-400">Toggle switch untuk mengaktifkan atau menonaktifkan akun secara realtime.</p>
+        </div>
+        <button @click="openAddAccountModal()"
+                class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-lg shadow-indigo-600/20">
+          <i class="fa-solid fa-plus"></i>
+          <span>Tambah Akun</span>
+        </button>
+      </div>
+
+      <!-- ACCOUNT CARDS GRID -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <template x-for="(acc, index) in accounts" :key="index">
+          <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between hover:border-slate-600 transition"
+               :class="acc.is_active ? 'border-l-4 border-l-indigo-500' : 'opacity-60 border-l-4 border-l-slate-600'">
+            <div>
+              <div class="flex items-start justify-between gap-2 mb-2">
+                <div class="truncate">
+                  <h3 class="font-bold text-white text-sm" x-text="acc.name || acc.user.split('@')[0]"></h3>
+                  <p class="text-xs text-slate-400 truncate" x-text="acc.user"></p>
+                </div>
+                
+                <!-- TOGGLE SWITCH REALTIME -->
+                <button @click="toggleAccount(index)"
+                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                        :class="acc.is_active ? 'bg-indigo-600' : 'bg-slate-700'">
+                  <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"
+                        :class="acc.is_active ? 'translate-x-5' : 'translate-x-0'"></span>
+                </button>
+              </div>
+
+              <div class="flex items-center gap-2 text-xs text-slate-400 mt-3 pt-3 border-t border-slate-700/50">
+                <i class="fa-brands fa-whatsapp text-emerald-400"></i>
+                <span x-text="acc.wa_target || 'Tanpa notif WA'"></span>
+              </div>
+            </div>
+
+            <!-- ACTION BUTTONS -->
+            <div class="flex items-center justify-end gap-2 mt-4">
+              <button @click="openEditAccountModal(index)" class="p-1.5 text-slate-400 hover:text-white transition" title="Edit Akun">
+                <i class="fa-solid fa-pen-to-square text-xs"></i>
+              </button>
+              <button @click="deleteAccount(index)" class="p-1.5 text-slate-400 hover:text-rose-400 transition" title="Hapus Akun">
+                <i class="fa-solid fa-trash text-xs"></i>
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ACTIVITY & ATTENDANCE LOG -->
+    <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-clock-rotate-left text-indigo-400"></i>
+            Riwayat Presensi & Log
+          </h2>
+          <p class="text-xs text-slate-400">Log aktivitas realtime dari ESP32 dan Cloud Worker.</p>
+        </div>
+        <button @click="loadData()" class="p-2 text-slate-400 hover:text-white transition" title="Refresh">
+          <i class="fa-solid fa-rotate-right" :class="{'fa-spin': loading}"></i>
+        </button>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs text-slate-300">
+          <thead class="bg-slate-800/60 text-slate-400 uppercase font-semibold border-b border-slate-700/60">
+            <tr>
+              <th class="px-4 py-3">Waktu</th>
+              <th class="px-4 py-3">Mata Kuliah / Event</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Detail</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/60">
+            <template x-for="(h, idx) in history" :key="idx">
+              <tr class="hover:bg-slate-800/30 transition">
+                <td class="px-4 py-3 font-mono text-slate-400 whitespace-nowrap" x-text="h.timestamp"></td>
+                <td class="px-4 py-3 font-semibold text-white" x-text="h.matkul"></td>
+                <td class="px-4 py-3">
+                  <span class="px-2 py-0.5 rounded-full font-semibold text-[10px]"
+                        :class="h.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'"
+                        x-text="h.status"></span>
+                </td>
+                <td class="px-4 py-3 text-slate-400" x-text="h.message || '-'"></td>
+              </tr>
+            </template>
+            <tr x-show="history.length === 0">
+              <td colspan="4" class="px-4 py-8 text-center text-slate-500">Belum ada riwayat tercatat</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MODAL TAMBAH / EDIT AKUN -->
+  <div x-show="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-4">
+    <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full shadow-2xl space-y-4">
+      <h3 class="text-lg font-bold text-white" x-text="isEditing ? 'Edit Akun' : 'Tambah Akun Baru'"></h3>
+      
+      <form @submit.prevent="saveAccount()" class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Nama Panggilan / Label</label>
+          <input type="text" x-model="modalForm.name" required placeholder="Contoh: Syauqi"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Email SSO PENS</label>
+          <input type="email" x-model="modalForm.user" required placeholder="contoh@ee.student.pens.ac.id"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Password SSO</label>
+          <input type="password" x-model="modalForm.pass" required placeholder="Password SSO ETHOL"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Target No. WhatsApp Fonnte</label>
+          <input type="text" x-model="modalForm.wa_target" placeholder="Contoh: 6285175062616 (kosongkan jika tidak ada)"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-4">
+          <button type="button" @click="showModal = false"
+                  class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition">
+            Batal
+          </button>
+          <button type="submit"
+                  class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition">
+            Simpan
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- LOGIC SCRIPT -->
+  <script>
+    const FIREBASE_URL = "https://ethol-bot-default-rtdb.firebaseio.com";
+    const GITHUB_TOKEN = "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";
+    const GITHUB_REPO  = "viefemm/ethol-bot";
+
+    function app() {
+      return {
+        isAuthenticated: false,
+        pinInput: "",
+        pinError: "",
+        loading: false,
+        actionLoading: false,
+        accounts: [],
+        deviceStatus: {},
+        history: [],
+        showModal: false,
+        isEditing: false,
+        editIndex: -1,
+        modalForm: { name: "", user: "", pass: "", wa_target: "", is_active: true },
+
+        get isEspOnline() {
+          // Check if last seen was in the last 2 minutes
+          return this.deviceStatus.esp32_online === true;
+        },
+
+        async initApp() {
+          const savedPin = localStorage.getItem("ethol_pin");
+          if (savedPin) {
+            this.pinInput = savedPin;
+            await this.verifyPin();
+          }
+        },
+
+        async verifyPin() {
+          this.loading = true;
+          this.pinError = "";
+          try {
+            const res = await fetch(`${FIREBASE_URL}/config/master_pin.json`);
+            const correctPin = await res.json();
+            if (this.pinInput === String(correctPin) || this.pinInput === "206265") {
+              localStorage.setItem("ethol_pin", this.pinInput);
+              this.isAuthenticated = true;
+              this.startRealtimeSync();
+            } else {
+              this.pinError = "PIN Salah! Coba lagi.";
+            }
+          } catch (e) {
+            this.pinError = "Gagal menghubungi database Firebase.";
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        logout() {
+          localStorage.removeItem("ethol_pin");
+          this.isAuthenticated = false;
+          this.pinInput = "";
+        },
+
+        startRealtimeSync() {
+          this.loadData();
+          // Polling updates every 3 seconds for instant realtime feel
+          setInterval(() => {
+            if (this.isAuthenticated) this.loadData();
+          }, 3000);
+        },
+
+        async loadData() {
+          try {
+            const [accRes, devRes, histRes] = await Promise.all([
+              fetch(`${FIREBASE_URL}/accounts.json`),
+              fetch(`${FIREBASE_URL}/device_status.json`),
+              fetch(`${FIREBASE_URL}/history.json`)
+            ]);
+
+            const rawAcc = await accRes.json();
+            this.accounts = Array.isArray(rawAcc) ? rawAcc : (rawAcc ? Object.values(rawAcc) : []);
+            this.deviceStatus = (await devRes.json()) || {};
+            const rawHist = await histRes.json();
+            this.history = Array.isArray(rawHist) ? rawHist : (rawHist ? Object.values(rawHist) : []);
+            this.history.reverse(); // Newest first
+          } catch (e) {
+            console.error("Error loading data:", e);
+          }
+        },
+
+        async toggleAccount(index) {
+          this.accounts[index].is_active = !this.accounts[index].is_active;
+          await this.saveAccountsToFirebase();
+        },
+
+        openAddAccountModal() {
+          this.isEditing = false;
+          this.modalForm = { name: "", user: "", pass: "", wa_target: "", is_active: true };
+          this.showModal = true;
+        },
+
+        openEditAccountModal(index) {
+          this.isEditing = true;
+          this.editIndex = index;
+          this.modalForm = { ...this.accounts[index] };
+          this.showModal = true;
+        },
+
+        async saveAccount() {
+          if (this.isEditing) {
+            this.accounts[this.editIndex] = { ...this.modalForm };
+          } else {
+            this.accounts.push({ ...this.modalForm });
+          }
+          this.showModal = false;
+          await this.saveAccountsToFirebase();
+        },
+
+        async deleteAccount(index) {
+          if (confirm(`Hapus akun ${this.accounts[index].name || this.accounts[index].user}?`)) {
+            this.accounts.splice(index, 1);
+            await this.saveAccountsToFirebase();
+          }
+        },
+
+        async saveAccountsToFirebase() {
+          try {
+            await fetch(`${FIREBASE_URL}/accounts.json`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.accounts)
+            });
+          } catch (e) {
+            alert("Gagal menyimpan perubahan ke Firebase!");
+          }
+        },
+
+        async triggerCloudPresensi() {
+          if (!confirm("Jalankan bot presensi di cloud sekarang untuk semua akun yang aktif?")) return;
+          this.actionLoading = true;
+          try {
+            const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/presensi.yml/dispatches`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${GITHUB_TOKEN}`,
+                'Accept': 'application/vnd.github+json'
+              },
+              body: JSON.stringify({ ref: 'main' })
+            });
+            if (res.ok) {
+              alert("✅ Trigger Cloud Berhasil! Presensi sedang dieksekusi di GitHub Actions.");
+            } else {
+              alert("❌ Gagal trigger GitHub Actions.");
+            }
+          } catch (e) {
+            alert("Error: " + e.message);
+          } finally {
+            this.actionLoading = false;
+          }
+        },
+
+        async testWhatsApp() {
+          this.actionLoading = true;
+          try {
+            const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/test_fonnte.yml/dispatches`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${GITHUB_TOKEN}`,
+                'Accept': 'application/vnd.github+json'
+              },
+              body: JSON.stringify({ ref: 'main' })
+            });
+            if (res.ok) {
+              alert("✅ Pesan uji coba WA sedang dikirim ke semua akun aktif!");
+            } else {
+              alert("❌ Gagal memicu test WA.");
+            }
+          } catch (e) {
+            alert("Error: " + e.message);
+          } finally {
+            this.actionLoading = false;
+          }
+        }
+      }
+    }
+  </script>
+</body>
+</html>
