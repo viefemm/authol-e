@@ -1,8 +1,8 @@
 """
-ETHOL Presensi Bot - Cloud Parallel Worker
+ETHOL Presensi Bot - Cloud Parallel Worker & Account Verifier
 Mengambil daftar akun aktif langsung dari Firebase Realtime Database,
-menjalankan presensi secara paralel, mencatat log ke Firebase,
-mengirimkan notifikasi multi-channel (WhatsApp via Fonnte & Telegram),
+menjalankan presensi secara paralel, memverifikasi akun ETHOL / MIS CAS,
+mencatat log ke Firebase, mengirimkan notifikasi multi-channel (WhatsApp via Fonnte & Telegram),
 dan memantau kesehatan ESP32 (Cloud Watchdog).
 Dilengkapi perlindungan notifikasi kegagalan di setiap titik (Zero Fail-Silent).
 """
@@ -183,17 +183,19 @@ def get_active_accounts():
 
 class AccountWorker:
     def __init__(self, config: dict):
-        self.config     = config
-        self.user       = config["user"]
-        self.password   = config["pass"]
-        self.wa_target  = config.get("wa_target", "")
-        self.tg_chat_id = config.get("tg_chat_id", "")
-        self.name       = config.get("name", self.user.split("@")[0])
-        self.label      = self.name
-        self.log        = logging.getLogger(self.label)
-        self.session    = requests.Session()
+        self.config         = config
+        self.user           = config["user"]
+        self.password       = config["pass"]
+        self.wa_target      = config.get("wa_target", "")
+        self.tg_chat_id     = config.get("tg_chat_id", "")
+        self.name           = config.get("name", self.user.split("@")[0])
+        self.label          = self.name
+        self.log            = logging.getLogger(self.label)
+        self.session        = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0 (EtholBot/2.0)"})
         self.student_number = ""
+        self.student_name   = ""
+        self.student_email  = ""
 
     def _mis_login(self) -> bool:
         self.log.info("Login MIS CAS...")
@@ -289,13 +291,30 @@ class AccountWorker:
             self.session.post("https://ethol.pens.ac.id/api/auth/refresh", json={}, timeout=15)
             rv = self.session.get("https://ethol.pens.ac.id/api/auth/validasi-token", timeout=15)
             if rv.status_code == 200:
-                self.student_number = str(rv.json().get("nomor", ""))
-                self.log.info(f"✅ SSO ETHOL berhasil. Nomor: {self.student_number}")
+                data = rv.json() or {}
+                self.student_number = str(data.get("nomor", ""))
+                self.student_name   = str(data.get("nama", ""))
+                self.student_email  = str(data.get("email", ""))
+                self.log.info(f"✅ SSO ETHOL berhasil. Nama: {self.student_name} | NRP: {self.student_number}")
                 return True
             return False
         except Exception as e:
             self.log.error(f"Exception SSO: {e}")
             return False
+
+    def verify(self) -> dict:
+        """Verifikasi apakah kredensial akun valid di MIS CAS dan ETHOL PENS."""
+        self.log.info(f"Verifikasi akun ETHOL untuk {self.user}...")
+        if not self._mis_login():
+            return {"success": False, "error": "Gagal login ke MIS CAS (Username/Password salah atau CAS PENS down)"}
+        if not self._ethol_sso():
+            return {"success": False, "error": "Gagal SSO ke ETHOL (Token SSO tidak valid)"}
+        return {
+            "success": True,
+            "nomor": self.student_number,
+            "nama": self.student_name,
+            "email": self.student_email
+        }
 
     def run_once(self):
         """Jalankan satu siklus cek dan submit presensi dengan fail-safe notification."""
@@ -450,15 +469,105 @@ class AccountWorker:
             notify_client(self.config, msg)
 
 
+def handle_verification(target_user: str = ""):
+    """Menjalankan verifikasi akun ETHOL / MIS dan menyimpan statusnya ke Firebase."""
+    logging.info(f"=== Menjalankan Verifikasi Akun ETHOL (Target: {target_user or 'Semua Akun'}) ===")
+
+    try:
+        r = requests.get(f"{FIREBASE_URL}/accounts.json", timeout=10)
+        raw_data = r.json() if r.status_code == 200 else []
+        accounts_list = raw_data if isinstance(raw_data, list) else (list(raw_data.values()) if isinstance(raw_data, dict) else [])
+    except Exception as e:
+        logging.error(f"Gagal mengambil accounts dari Firebase: {e}")
+        return
+
+    verified_count = 0
+    last_result = {}
+
+    for acc in accounts_list:
+        user = acc.get("user", "")
+        if target_user and target_user.lower() not in ("all", "") and user.lower() != target_user.lower():
+            continue
+
+        worker = AccountWorker(acc)
+        res = worker.verify()
+        when = timestamp_str()
+
+        if res["success"]:
+            verified_count += 1
+            acc["verified"] = True
+            acc["nrp"] = res["nomor"]
+            acc["official_name"] = res["nama"]
+            acc["last_verified"] = when
+            acc["verify_status"] = "OK"
+            acc["verify_message"] = "Akun Valid & Terverifikasi"
+            last_result = {
+                "status": "SUCCESS",
+                "user": user,
+                "nama": res["nama"],
+                "nrp": res["nomor"],
+                "timestamp": when
+            }
+            log_to_firebase("Verifikasi Akun", "VERIFIED_OK", f"Akun {user} valid. Nama: {res['nama']}, NRP: {res['nomor']}")
+        else:
+            acc["verified"] = False
+            acc["last_verified"] = when
+            acc["verify_status"] = "FAILED"
+            acc["verify_message"] = res["error"]
+            last_result = {
+                "status": "FAILED",
+                "user": user,
+                "error": res["error"],
+                "timestamp": when
+            }
+            log_to_firebase("Verifikasi Akun", "VERIFIED_FAIL", f"Akun {user} gagal verifikasi: {res['error']}")
+
+    try:
+        requests.put(f"{FIREBASE_URL}/accounts.json", json=accounts_list, timeout=10)
+        if last_result:
+            requests.put(f"{FIREBASE_URL}/verify_result.json", json=last_result, timeout=10)
+        requests.put(f"{FIREBASE_URL}/verify_request/status.json", json="DONE", timeout=10)
+        logging.info(f"✅ Selesai verifikasi akun (Berhasil: {verified_count}/{len(accounts_list)}).")
+    except Exception as e:
+        logging.error(f"Gagal simpan hasil verifikasi ke Firebase: {e}")
+
+
 def run_worker(config):
     AccountWorker(config).run_once()
 
 
 def main():
-    # 1. Jalankan Cloud Watchdog untuk kesehatan ESP32
+    # 1. Cek apakah ada request verifikasi akun (dari Event Payload, Env, atau Firebase)
+    client_payload_raw = os.environ.get("CLIENT_PAYLOAD", "{}")
+    event_action = os.environ.get("GITHUB_EVENT_ACTION", "")
+    try:
+        payload = json.loads(client_payload_raw) if client_payload_raw else {}
+    except Exception:
+        payload = {}
+
+    target_user = payload.get("target_user") or os.environ.get("TARGET_USER", "")
+    action = payload.get("action") or event_action
+
+    # Cek juga dari Firebase verify_request jika pending
+    if not target_user and not action:
+        try:
+            r = requests.get(f"{FIREBASE_URL}/verify_request.json", timeout=5)
+            if r.status_code == 200 and r.json():
+                req = r.json()
+                if req.get("status") == "PENDING":
+                    action = "verify"
+                    target_user = req.get("user", "all")
+        except Exception:
+            pass
+
+    if action in ("verify", "ethol_verify_account"):
+        handle_verification(target_user)
+        return
+
+    # 2. Jalankan Cloud Watchdog untuk kesehatan ESP32
     check_esp32_offline_watchdog()
 
-    # 2. Proses presensi multi-akun aktif
+    # 3. Proses presensi multi-akun aktif
     accounts = get_active_accounts()
     if not accounts:
         logging.warning("Tidak ada akun aktif di Firebase / ACCOUNTS_JSON!")
