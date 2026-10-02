@@ -103,8 +103,8 @@
             <span x-text="isEspOnline ? 'ONLINE' : 'OFFLINE'"></span>
           </span>
         </div>
-        <p class="text-lg font-bold text-white truncate" x-text="deviceStatus.last_checked_matkul || 'Standby'"></p>
-        <p class="text-xs text-slate-500 mt-1" x-text="'Ping: ' + (deviceStatus.last_seen || '-')"></p>
+        <p class="text-lg font-bold text-white truncate" x-text="isEspOnline ? (deviceStatus.last_checked_matkul || 'Standby') : 'Hardware Terputus'"></p>
+        <p class="text-xs text-slate-500 mt-1" x-text="pingStatusText"></p>
       </div>
 
       <!-- ACTIVE ACCOUNTS -->
@@ -172,7 +172,7 @@
                         class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
                         :class="acc.is_active ? 'bg-indigo-600' : 'bg-slate-700'">
                   <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"
-                        :class="acc.is_active ? 'translate-x-5' : 'translate-x-0'"></span>
+                        :class="acc.is_active ? 'translate-x-5' : 'translate-x-0'\"></span>
                 </button>
               </div>
 
@@ -256,7 +256,7 @@
                 <td class="px-4 py-3 font-semibold text-white" x-text="h.matkul"></td>
                 <td class="px-4 py-3">
                   <span class="px-2 py-0.5 rounded-full font-semibold text-[10px]"
-                        :class="h.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : (h.status === 'TEST_OK' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30')"
+                        :class="h.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : (h.status === 'TEST_OK' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/30' : (h.status === 'OFFLINE_ALERT' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'))"
                         x-text="h.status"></span>
                 </td>
                 <td class="px-4 py-3 text-slate-400" x-text="h.message || '-'"></td>
@@ -363,6 +363,7 @@
   <script>
     const FIREBASE_URL = "https://ethol-bot-default-rtdb.firebaseio.com";
     const FONNTE_TOKEN = "wB7GEFCDTyDLpU2PjNPp";
+    const ADMIN_WA     = "6285175062616";
 
     function app() {
       return {
@@ -384,7 +385,20 @@
         configForm: { master_pin: "206265", telegram_bot_token: "" },
 
         get isEspOnline() {
-          return this.deviceStatus.esp32_online === true;
+          if (!this.deviceStatus.last_seen_epoch) return false;
+          const nowEpoch = Math.floor(Date.now() / 1000);
+          const diffSeconds = nowEpoch - Number(this.deviceStatus.last_seen_epoch);
+          // Toleransi 70 detik (ESP32 heartbeat setiap 30 detik)
+          return diffSeconds >= 0 && diffSeconds < 70;
+        },
+
+        get pingStatusText() {
+          if (!this.deviceStatus.last_seen_epoch) return "Ping: Belum pernah tersambung";
+          const nowEpoch = Math.floor(Date.now() / 1000);
+          const diffSeconds = Math.max(0, nowEpoch - Number(this.deviceStatus.last_seen_epoch));
+          if (diffSeconds < 60) return `Ping: ${diffSeconds} detik lalu`;
+          if (diffSeconds < 3600) return `Offline sejak: ${Math.floor(diffSeconds / 60)} menit lalu`;
+          return `Offline sejak: ${Math.floor(diffSeconds / 3600)} jam lalu`;
         },
 
         async initApp() {
@@ -444,8 +458,56 @@
             this.history = Array.isArray(rawHist) ? rawHist : (rawHist ? Object.values(rawHist) : []);
             this.history.reverse();
             this.config = (await cfgRes.json()) || {};
+
+            // Watchdog: Cek apakah ESP32 mati & kirim alert ke Admin jika belum dikirim
+            await this.checkWatchdogAlert();
           } catch (e) {
             console.error("Error loading data:", e);
+          }
+        },
+
+        async checkWatchdogAlert() {
+          if (!this.deviceStatus.last_seen_epoch) return;
+          const nowEpoch = Math.floor(Date.now() / 1000);
+          const diffSeconds = nowEpoch - Number(this.deviceStatus.last_seen_epoch);
+
+          // Jika mati lebih dari 75 detik dan belum dikirim alert offline
+          if (diffSeconds > 75 && this.deviceStatus.offline_alert_sent === false) {
+            console.warn("Watchdog: ESP32 Offline detected, sending alert to admin...");
+            const alertMsg = `🔴 *PERINGATAN: ESP32 OFFLINE (MATI LAMPU / TERPUTUS)*\n\nHardware ESP32 tidak mengirim heartbeat selama >75 detik.\nKemungkinan terjadi *mati lampu di kos* atau *WiFi terputus*.\n\n⏰ *Terakhir Aktif:* ${this.deviceStatus.last_seen || '-'}\n📌 *Status Terakhir:* ${this.deviceStatus.last_status || '-'}\n📚 *Matkul Terakhir:* ${this.deviceStatus.last_checked_matkul || '-'}\n\n_Segera periksa daya listrik / koneksi WiFi di kos._`;
+
+            try {
+              await fetch("https://api.fonnte.com/send", {
+                method: "POST",
+                headers: {
+                  "Authorization": FONNTE_TOKEN,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  target: ADMIN_WA,
+                  message: alertMsg
+                })
+              });
+
+              await fetch(`${FIREBASE_URL}/device_status/offline_alert_sent.json`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(true)
+              });
+
+              await fetch(`${FIREBASE_URL}/history.json`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  matkul: "ESP32 Watchdog",
+                  status: "OFFLINE_ALERT",
+                  message: "Peringatan ESP32 mati/offline dikirim ke Admin WhatsApp"
+                })
+              });
+            } catch (err) {
+              console.error("Gagal kirim alert watchdog:", err);
+            }
           }
         },
 
@@ -530,7 +592,7 @@
           const labelName = acc.name || acc.user.split("@")[0];
           const nowWib = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
 
-          const testMsg = `🔔 *Test Notifikasi Client ETHOL Bot*\\n\\nHalo *${labelName}*!\\nKoneksi notifikasi untuk akun Anda (*${acc.user}*) telah aktif dan siap menerima status presensi otomatis.\\n\\n⏰ *Waktu Tes:* ${nowWib} WIB\\n\\n_Pesan otomatis dikirim dari Dashboard HP._`;
+          const testMsg = `🔔 *Test Notifikasi Client ETHOL Bot*\n\nHalo *${labelName}*!\nKoneksi notifikasi untuk akun Anda (*${acc.user}*) telah aktif dan siap menerima status presensi otomatis.\n\n⏰ *Waktu Tes:* ${nowWib} WIB\n\n_Pesan otomatis dikirim dari Dashboard HP._`;
 
           const results = [];
           const errors = [];
@@ -572,7 +634,7 @@
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
                     chat_id: acc.tg_chat_id,
-                    text: testMsg.replace(/\\n/g, "\n"),
+                    text: testMsg,
                     parse_mode: "Markdown"
                   })
                 });
