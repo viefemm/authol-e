@@ -1,6 +1,6 @@
 # ⚡ Authol-E
 
-> **Hybrid IoT & Serverless Academic Telemetry Orchestrator for ETHOL PENS**  
+> **Hybrid IoT & Serverless Academic Telemetry Orchestrator for ETHOL**  
 > *A high-reliability, event-driven session monitor, multi-student state synchronizer, and multi-channel notification dispatcher.*
 
 [![Architecture](https://img.shields.io/badge/Architecture-Hybrid%20IoT%20%2B%20Serverless-indigo?style=flat-square)]()
