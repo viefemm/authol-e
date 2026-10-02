@@ -126,15 +126,21 @@
           <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Notifikasi Client</span>
           <span class="text-xs text-emerald-400 font-semibold">Multi-Channel</span>
         </div>
-        <div class="flex items-center gap-3 mt-1">
-          <span class="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
-            <i class="fa-brands fa-whatsapp text-sm"></i> WhatsApp
-          </span>
-          <span class="flex items-center gap-1.5 text-xs text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20">
-            <i class="fa-brands fa-telegram text-sm"></i> Telegram
-          </span>
+        <div class="flex items-center gap-2.5 mt-1">
+          <button @click.stop.prevent="testWhatsAppChannel()" :disabled="testingWa"
+                  class="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 px-3 py-1.5 rounded-lg border border-emerald-500/30 font-semibold transition cursor-pointer disabled:opacity-50"
+                  title="Klik untuk test koneksi WhatsApp Fonnte">
+            <i class="fa-brands fa-whatsapp text-sm" :class="{'fa-spin': testingWa}"></i>
+            <span x-text="testingWa ? 'Testing...' : 'Test WA'"></span>
+          </button>
+          <button @click.stop.prevent="testTelegramChannel()" :disabled="testingTg"
+                  class="flex items-center gap-1.5 text-xs text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 active:scale-95 px-3 py-1.5 rounded-lg border border-sky-500/30 font-semibold transition cursor-pointer disabled:opacity-50"
+                  title="Klik untuk test token Telegram Bot">
+            <i class="fa-brands fa-telegram text-sm" :class="{'fa-spin': testingTg}"></i>
+            <span x-text="testingTg ? 'Testing...' : 'Test Telegram'"></span>
+          </button>
         </div>
-        <p class="text-xs text-slate-500 mt-2">Test notifikasi langsung ke client di kartu akun</p>
+        <p class="text-xs text-slate-500 mt-2">Klik tombol di atas untuk test gateway WA & Tele</p>
       </div>
     </div>
 
@@ -373,6 +379,8 @@
         loading: false,
         actionLoading: false,
         testingIndex: null,
+        testingWa: false,
+        testingTg: false,
         _localAlertSent: false,
         accounts: [],
         deviceStatus: {},
@@ -695,6 +703,75 @@
             }
           } finally {
             this.testingIndex = null;
+          }
+        },
+
+        async testWhatsAppChannel() {
+          if (this.testingWa) return;
+          this.testingWa = true;
+          const nowWib = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+          const msg = `🔔 *Test Gateway WhatsApp Fonnte*\n\nKoneksi API Fonnte berhasil terverifikasi dan aktif!\n\n⏰ *Waktu:* ${nowWib} WIB\n📱 *Admin:* ${ADMIN_WA}\n\n_Pesan otomatis dikirim dari Web Dashboard ETHOL Bot._`;
+
+          try {
+            const res = await fetch("https://api.fonnte.com/send", {
+              method: "POST",
+              headers: {
+                "Authorization": FONNTE_TOKEN,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                target: ADMIN_WA,
+                message: msg
+              })
+            });
+            const data = await res.json();
+            if (data.status === true) {
+              alert(`✅ WhatsApp Gateway Normal!\nPesan uji coba berhasil dikirim ke Admin (${ADMIN_WA}).`);
+              await fetch(`${FIREBASE_URL}/history.json`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  matkul: "Test Gateway WhatsApp",
+                  status: "TEST_OK",
+                  message: `Uji coba WhatsApp Gateway ke Admin (${ADMIN_WA}) berhasil.`
+                })
+              });
+              await this.loadData();
+            } else {
+              alert(`❌ Gagal kirim WA Fonnte: ${data.reason || data.message || "Unknown error"}`);
+            }
+          } catch (e) {
+            alert("❌ Gagal terhubung ke API Fonnte: " + e.message);
+          } finally {
+            this.testingWa = false;
+          }
+        },
+
+        async testTelegramChannel() {
+          if (this.testingTg) return;
+          const tgToken = this.config.telegram_bot_token;
+          if (!tgToken) {
+            if (confirm("⚠️ Token Bot Telegram belum diatur!\n\nApakah Anda ingin membuka menu Pengaturan untuk memasukkan token bot Telegram?")) {
+              this.openConfigModal();
+            }
+            return;
+          }
+
+          this.testingTg = true;
+          try {
+            const res = await fetch(`https://api.telegram.org/bot${tgToken}/getMe`);
+            const data = await res.json();
+            if (data.ok === true) {
+              const botInfo = data.result;
+              alert(`✅ Bot Telegram Terhubung!\n\n🤖 Nama Bot: ${botInfo.first_name}\n🔗 Username: @${botInfo.username}\n🆔 Bot ID: ${botInfo.id}\n\nGateway Telegram siap digunakan untuk notifikasi.`);
+            } else {
+              alert(`❌ Token Telegram Tidak Valid: ${data.description || "Gagal verifikasi token"}\n\nSilakan periksa kembali di menu Pengaturan.`);
+            }
+          } catch (e) {
+            alert("❌ Gagal menghubungi API Telegram: " + e.message);
+          } finally {
+            this.testingTg = false;
           }
         },
 
