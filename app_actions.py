@@ -4,7 +4,10 @@ Mengambil daftar akun aktif langsung dari Firebase Realtime Database,
 menjalankan presensi secara paralel, memverifikasi akun ETHOL / MIS CAS,
 mencatat log ke Firebase, mengirimkan notifikasi multi-channel (WhatsApp via Fonnte & Telegram),
 dan memantau kesehatan ESP32 (Cloud Watchdog).
-Dilengkapi perlindungan notifikasi kegagalan di setiap titik (Zero Fail-Silent).
+Dilengkapi perlindungan:
+- Zero Fail-Silent di setiap titik kegagalan
+- Deteksi presensi manual (jika sudah absen duluan)
+- Filter khusus matakuliah sistem kloter 2 mingguan (221835, 221847, 221839, 221840)
 """
 
 import os
@@ -32,6 +35,9 @@ ADMIN_WA           = os.environ.get("ADMIN_WA", "6285175062616")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 JAM_MULAI          = int(os.environ.get("JAM_MULAI", "6"))
 JAM_SELESAI        = int(os.environ.get("JAM_SELESAI", "21"))
+
+# Matakuliah khusus 2 minggu sekali (Sistem Kloter) yang memerlukan presensi manual
+DEFAULT_MANUAL_KULIAH_IDS = ["221835", "221847", "221839", "221840"]
 
 
 def now_wib() -> datetime:
@@ -72,6 +78,27 @@ def get_tg_token() -> str:
     except Exception:
         pass
     return ""
+
+def get_manual_kuliah_ids() -> list:
+    """Mengambil daftar ID matakuliah sistem kloter 2 mingguan."""
+    try:
+        r = requests.get(f"{FIREBASE_URL}/config/manual_kuliah_ids.json", timeout=5)
+        if r.status_code == 200 and r.json():
+            data = r.json()
+            if isinstance(data, list):
+                return [str(x).strip() for x in data if str(x).strip()]
+            elif isinstance(data, str):
+                return [x.strip() for x in data.split(",") if x.strip()]
+    except Exception:
+        pass
+    return DEFAULT_MANUAL_KULIAH_IDS
+
+def is_already_present_msg(msg_str: str) -> bool:
+    """Mendeteksi apakah respons server menandakan mahasiswa sudah presensi manual."""
+    if not msg_str:
+        return False
+    lower = msg_str.lower()
+    return ("sudah" in lower and any(w in lower for w in ["presensi", "absen", "isi", "mengisi", "ada", "tercatat", "terdaftar"])) or ("already" in lower)
 
 def send_wa(target: str, message: str) -> bool:
     if not FONNTE_TOKEN or not target:
@@ -379,7 +406,7 @@ class AccountWorker:
             kuliah, js = parts[0].strip(), parts[1].strip()
             idx    = ket.find("untuk matakuliah ")
             matkul = ket[idx + 17:].strip() if idx >= 0 else ket.strip()
-            self.log.info(f"📢 Presensi terbuka: {matkul}")
+            self.log.info(f"📢 Presensi terbuka: {matkul} (Kuliah ID: {kuliah})")
 
             ra = self.session.get(
                 f"https://ethol.pens.ac.id/api/presensi/aktif-kuliah?kuliah={kuliah}&jenis_schema={js}",
@@ -409,6 +436,26 @@ class AccountWorker:
                 self.log.info("Presensi belum aktif (LOCKED)")
                 return
 
+            # 4. Pengecekan Khusus Matakuliah 2 Mingguan (Sistem Kloter / Shift)
+            manual_ids = get_manual_kuliah_ids()
+            if str(kuliah) in manual_ids:
+                self.log.info(f"Matakuliah {matkul} (ID {kuliah}) adalah jadwal 2 mingguan (Kloter). Mengirim peringatan manual...")
+                log_to_firebase(matkul, "KLOTER_ALERT", f"Peringatan presensi kloter 2 mingguan dikirim ke {self.label} (Kuliah ID: {kuliah})")
+                msg = (
+                    f"📢 *PERINGATAN: Presensi Dibuka (Sistem Kloter 2 Minggu Sekali)*\n\n"
+                    f"👤 *Akun:* {self.label}\n"
+                    f"📚 *Mata Kuliah:* {matkul} (ID: {kuliah})\n"
+                    f"⏰ *Waktu:* {when}\n\n"
+                    f"⚠️ *Perhatian Khusus:*\n"
+                    f"Mata kuliah ini berlangsung secara *2 minggu sekali (Sistem Kloter/Shift)*.\n"
+                    f"Bot sengaja *tidak melakukan presensi otomatis* agar tidak salah absen di luar jadwal kloter Anda.\n\n"
+                    f"👉 *Jika hari ini adalah jadwal kloter Anda, silakan segera lakukan presensi manual di ETHOL:*\n"
+                    f"https://ethol.pens.ac.id"
+                )
+                notify_client(self.config, msg)
+                return
+
+            # 5. Pengecekan Kunci Presensi
             key = aktif_data.get("key", "")
             if not key or not self.student_number:
                 self.log.warning("Key presensi kosong atau student_number tidak ada")
@@ -423,6 +470,7 @@ class AccountWorker:
                 notify_client(self.config, msg)
                 return
 
+            # 6. Submit Presensi ke ETHOL
             payload = {
                 "kuliah": int(kuliah), "jenis_schema": int(js),
                 "mahasiswa": int(self.student_number),
@@ -444,6 +492,18 @@ class AccountWorker:
                     f"📚 *Mata Kuliah:* {matkul}\n"
                     f"⏰ *Waktu:* {when}\n\n"
                     f"_Presensi otomatis via ETHOL Bot._"
+                )
+                notify_client(self.config, msg)
+            elif is_already_present_msg(pesan):
+                # Client sudah melakukan presensi manual sebelumnya
+                log_to_firebase(matkul, "ALREADY_PRESENT", f"Akun {self.label} sudah presensi manual ({pesan})")
+                msg = (
+                    f"ℹ️ *Status: Sudah Melakukan Presensi Manual*\n\n"
+                    f"👤 *Akun:* {self.label}\n"
+                    f"📚 *Mata Kuliah:* {matkul}\n"
+                    f"⏰ *Waktu:* {when}\n\n"
+                    f"_{pesan or 'Anda telah tercatat melakukan presensi secara manual sebelumnya.'}_\n"
+                    f"_Tidak perlu melakukan presensi ulang._"
                 )
                 notify_client(self.config, msg)
             else:
