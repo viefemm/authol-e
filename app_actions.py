@@ -4,6 +4,7 @@ Mengambil daftar akun aktif langsung dari Firebase Realtime Database,
 menjalankan presensi secara paralel, mencatat log ke Firebase,
 mengirimkan notifikasi multi-channel (WhatsApp via Fonnte & Telegram),
 dan memantau kesehatan ESP32 (Cloud Watchdog).
+Dilengkapi perlindungan notifikasi kegagalan di setiap titik (Zero Fail-Silent).
 """
 
 import os
@@ -129,6 +130,16 @@ def check_esp32_offline_watchdog():
         alert_sent = dev.get("offline_alert_sent", False)
         now_epoch = int(time.time())
 
+        # Fallback jika epoch belum tersimpan tapi string ada
+        if not last_epoch and dev.get("last_seen"):
+            try:
+                raw = dev["last_seen"].replace(" WIB", "").strip()
+                dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+                dt = WIB.localize(dt)
+                last_epoch = int(dt.timestamp())
+            except Exception:
+                pass
+
         # Jika > 120 detik tidak ada heartbeat dan belum ada notif offline dikirim
         if last_epoch and (now_epoch - last_epoch > 120) and not alert_sent:
             logging.warning("⚠️ ESP32 terdeteksi OFFLINE! Mengirim notifikasi darurat ke Admin...")
@@ -143,7 +154,7 @@ def check_esp32_offline_watchdog():
             )
             send_wa(ADMIN_WA, msg)
             requests.put(f"{FIREBASE_URL}/device_status/offline_alert_sent.json", json=True, timeout=10)
-            log_to_firebase("ESP32 Watchdog", "OFFLINE_ALERT", "Notifikasi ESP32 mati dikirim ke Admin")
+            log_to_firebase("ESP32 Watchdog", "OFFLINE_ALERT", "Notifikasi ESP32 mati dikirim ke Admin WhatsApp")
     except Exception as e:
         logging.error(f"Error checking ESP32 health watchdog: {e}")
 
@@ -287,16 +298,39 @@ class AccountWorker:
             return False
 
     def run_once(self):
-        """Jalankan satu siklus cek dan submit presensi."""
+        """Jalankan satu siklus cek dan submit presensi dengan fail-safe notification."""
         self.student_number = ""
+        when = timestamp_str()
 
+        # 1. Pengecekan Login MIS
         if not self._mis_login():
-            self.log.error("Login MIS gagal, lewati akun ini")
-            return
-        if not self._ethol_sso():
-            self.log.error("SSO ETHOL gagal, lewati akun ini")
+            self.log.error("Login MIS gagal, mengirim notifikasi peringatan ke mahasiswa...")
+            log_to_firebase("MIS Login", "LOGIN_FAILED", f"Gagal login MIS CAS untuk akun {self.label}")
+            msg = (
+                f"⚠️ *PERINGATAN: Gagal Login MIS CAS*\n\n"
+                f"👤 *Akun:* {self.label} ({self.user})\n"
+                f"❌ *Kendala:* Autentikasi MIS CAS PENS ditolak (Password salah / Server Down).\n"
+                f"⏰ *Waktu:* {when}\n\n"
+                f"_Bot tidak dapat melakukan presensi otomatis. Segera cek kredensial atau presensi manual!_"
+            )
+            notify_client(self.config, msg)
             return
 
+        # 2. Pengecekan SSO ETHOL
+        if not self._ethol_sso():
+            self.log.error("SSO ETHOL gagal, mengirim notifikasi peringatan ke mahasiswa...")
+            log_to_firebase("ETHOL SSO", "SSO_FAILED", f"Gagal SSO ETHOL untuk akun {self.label}")
+            msg = (
+                f"⚠️ *PERINGATAN: Gagal SSO ETHOL*\n\n"
+                f"👤 *Akun:* {self.label}\n"
+                f"❌ *Kendala:* Sesi token SSO ETHOL tidak valid / server sibuk.\n"
+                f"⏰ *Waktu:* {when}\n\n"
+                f"_Segera buka https://ethol.pens.ac.id untuk melakukan presensi manual!_"
+            )
+            notify_client(self.config, msg)
+            return
+
+        # 3. Pengecekan Notifikasi & Eksekusi Presensi
         try:
             rn = self.session.get(
                 "https://ethol.pens.ac.id/api/notifikasi/mahasiswa?filterNotif=PRESENSI",
@@ -333,6 +367,17 @@ class AccountWorker:
                 timeout=15
             )
             if ra.status_code != 200:
+                self.log.error(f"Gagal akses aktif-kuliah (HTTP {ra.status_code})")
+                log_to_firebase(matkul, "API_ERROR", f"Gagal get aktif-kuliah HTTP {ra.status_code} untuk {self.label}")
+                msg = (
+                    f"⚠️ *Gagal Cek Sesi Presensi*\n\n"
+                    f"👤 *Akun:* {self.label}\n"
+                    f"📚 *Mata Kuliah:* {matkul}\n"
+                    f"❌ *Kendala:* Server ETHOL merespons HTTP {ra.status_code}\n"
+                    f"⏰ *Waktu:* {when}\n\n"
+                    f"_Segera presensi manual di ETHOL!_"
+                )
+                notify_client(self.config, msg)
                 return
 
             aktif_raw = ra.json()
@@ -347,6 +392,16 @@ class AccountWorker:
 
             key = aktif_data.get("key", "")
             if not key or not self.student_number:
+                self.log.warning("Key presensi kosong atau student_number tidak ada")
+                log_to_firebase(matkul, "KEY_EMPTY", f"Key presensi kosong untuk {self.label}")
+                msg = (
+                    f"⚠️ *Presensi Terbuka tapi Kunci Belum Ada*\n\n"
+                    f"👤 *Akun:* {self.label}\n"
+                    f"📚 *Mata Kuliah:* {matkul}\n"
+                    f"⏰ *Waktu:* {when}\n\n"
+                    f"_Kunci presensi belum tersedia di server. Harap presensi manual di web ETHOL._"
+                )
+                notify_client(self.config, msg)
                 return
 
             payload = {
@@ -359,7 +414,6 @@ class AccountWorker:
             rs_data = rs.json() if "application/json" in rs.headers.get("content-type","") else {}
             sukses  = rs.status_code == 200 and rs_data.get("sukses") is True
             pesan   = rs_data.get("pesan", "")
-            when    = timestamp_str()
 
             self.log.info(f"Submit HTTP {rs.status_code} sukses={sukses} pesan={pesan}")
 
@@ -380,11 +434,20 @@ class AccountWorker:
                     f"👤 *Akun:* {self.label}\n"
                     f"📚 *Mata Kuliah:* {matkul}\n"
                     f"⏰ *Waktu:* {when}\n\n"
-                    f"_{pesan or 'server tidak memberi pesan'} — segera presensi manual._"
+                    f"_{pesan or 'server menolak submit presensi'} — segera lakukan presensi manual!_"
                 )
                 notify_client(self.config, msg)
         except Exception as e:
             self.log.error(f"Exception run_once: {e}")
+            log_to_firebase("System Worker", "EXCEPTION", f"Worker error pada {self.label}: {str(e)[:100]}")
+            msg = (
+                f"⚠️ *Kendala Presensi Otomatis*\n\n"
+                f"👤 *Akun:* {self.label}\n"
+                f"❌ *Kendala:* Gangguan koneksi / runtime ({type(e).__name__})\n"
+                f"⏰ *Waktu:* {when}\n\n"
+                f"_Segera buka https://ethol.pens.ac.id untuk presensi manual._"
+            )
+            notify_client(self.config, msg)
 
 
 def run_worker(config):
