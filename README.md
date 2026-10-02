@@ -1,10 +1,3 @@
-# ETHOL Presensi Bot - Hybrid Architecture (ESP32 + Firebase + GitHub Actions)
-
-Sistem presensi otomatis ETHOL PENS cerdas dengan deteksi cepat (15s) via ESP32 Hardware Scout, sinkronisasi realtime database Firebase, eksekusi multi-akun di GitHub Actions, dan notifikasi WhatsApp instan via Fonnte.
-
-## 🌐 Web Dashboard (Mobile Friendly)
-- **URL Dashboard**: [https://viefemm.github.io/ethol-bot/](https://viefemm.github.io/ethol-bot/)
-
 ## 🚀 Fitur Utama
 - **Realtime State (<1s)**: Sinkronisasi status ESP32, toggle aktifasi akun mahasiswa, dan riwayat presensi langsung via Firebase Realtime Database.
 - **Deteksi Cepat (15s)**: ESP32 memantau notifikasi pembukaan presensi dosen tanpa membebani server/IP bans.
