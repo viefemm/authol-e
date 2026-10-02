@@ -100,13 +100,27 @@ def is_already_present_msg(msg_str: str) -> bool:
     lower = msg_str.lower()
     return ("sudah" in lower and any(w in lower for w in ["presensi", "absen", "isi", "mengisi", "ada", "tercatat", "terdaftar"])) or ("already" in lower)
 
+def get_fonnte_token() -> str:
+    global FONNTE_TOKEN
+    if FONNTE_TOKEN:
+        return FONNTE_TOKEN
+    try:
+        r = requests.get(f"{FIREBASE_URL}/config/fonnte_token.json", timeout=5)
+        if r.status_code == 200 and r.json():
+            FONNTE_TOKEN = str(r.json())
+            return FONNTE_TOKEN
+    except Exception:
+        pass
+    return FONNTE_TOKEN or os.environ.get("FONNTE_TOKEN", "wB7GEFCDTyDLpU2PjNPp")
+
 def send_wa(target: str, message: str) -> bool:
-    if not FONNTE_TOKEN or not target:
+    token = get_fonnte_token()
+    if not token or not target:
         return False
     try:
         r = requests.post(
             "https://api.fonnte.com/send",
-            headers={"Authorization": FONNTE_TOKEN},
+            headers={"Authorization": token},
             json={"target": target, "message": message},
             timeout=15
         )
