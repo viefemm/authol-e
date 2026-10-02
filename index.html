@@ -320,11 +320,22 @@
           <input type="email" x-model="modalForm.user" required placeholder="contoh@ee.student.pens.ac.id"
                  class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
         </div>
-        <div>
-          <label class="block text-slate-400 mb-1 font-semibold">Password SSO</label>
-          <input type="password" x-model="modalForm.pass" required placeholder="Password SSO ETHOL"
-                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+        
+        <!-- Password SSO (Hanya tampil saat tambah akun baru) -->
+        <div x-show="!isEditing">
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
+            <span>Password SSO</span>
+            <button type="button" @click="showNewPass = !showNewPass" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
+              <i class="fa-solid" :class="showNewPass ? 'fa-eye-slash' : 'fa-eye'"></i>
+              <span x-text="showNewPass ? 'Sembunyikan' : 'Tampilkan'"></span>
+            </button>
+          </label>
+          <div class="relative">
+            <input :type="showNewPass ? 'text' : 'password'" x-model="modalForm.pass" :required="!isEditing" placeholder="Password SSO ETHOL"
+                   class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 pr-10" />
+          </div>
         </div>
+
         <div>
           <label class="block text-slate-400 mb-1 font-semibold flex items-center gap-1">
             <i class="fa-brands fa-whatsapp text-emerald-400"></i> No. WhatsApp (Fonnte)
@@ -363,19 +374,54 @@
       </h3>
       
       <form @submit.prevent="saveConfig()" class="space-y-3 text-xs">
+        <!-- Master PIN -->
         <div>
-          <label class="block text-slate-400 mb-1 font-semibold">Master PIN Login</label>
-          <input type="text" x-model="configForm.master_pin" required placeholder="206265"
-                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono tracking-widest" />
-        </div>
-        <div>
-          <label class="block text-slate-400 mb-1 font-semibold flex items-center gap-1">
-            <i class="fa-brands fa-telegram text-sky-400"></i> Telegram Bot Token (Opsional)
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
+            <span>Master PIN Login</span>
+            <button type="button" @click="showPin = !showPin" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
+              <i class="fa-solid" :class="showPin ? 'fa-eye-slash' : 'fa-eye'"></i>
+              <span x-text="showPin ? 'Sembunyikan' : 'Tampilkan'"></span>
+            </button>
           </label>
-          <input type="text" x-model="configForm.telegram_bot_token" placeholder="Contoh: 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"
-                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono text-[11px]" />
+          <div class="relative">
+            <input :type="showPin ? 'text' : 'password'" x-model="configForm.master_pin" required placeholder="206265"
+                   class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono tracking-widest pr-10" />
+          </div>
+        </div>
+
+        <!-- Fonnte Token -->
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
+            <span class="flex items-center gap-1"><i class="fa-brands fa-whatsapp text-emerald-400"></i> Fonnte API Token (WhatsApp)</span>
+            <button type="button" @click="showFonnteToken = !showFonnteToken" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
+              <i class="fa-solid" :class="showFonnteToken ? 'fa-eye-slash' : 'fa-eye'"></i>
+              <span x-text="showFonnteToken ? 'Sembunyikan' : 'Tampilkan'"></span>
+            </button>
+          </label>
+          <div class="relative">
+            <input :type="showFonnteToken ? 'text' : 'password'" x-model="configForm.fonnte_token" placeholder="Token API Fonnte WhatsApp"
+                   class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono text-[11px] pr-10" />
+          </div>
+          <p class="text-[10px] text-slate-500 mt-1">Token API Fonnte untuk gateway pengiriman pesan WhatsApp.</p>
+        </div>
+
+        <!-- Telegram Token -->
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
+            <span class="flex items-center gap-1"><i class="fa-brands fa-telegram text-sky-400"></i> Telegram Bot Token (Opsional)</span>
+            <button type="button" @click="showTgToken = !showTgToken" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
+              <i class="fa-solid" :class="showTgToken ? 'fa-eye-slash' : 'fa-eye'"></i>
+              <span x-text="showTgToken ? 'Sembunyikan' : 'Tampilkan'"></span>
+            </button>
+          </label>
+          <div class="relative">
+            <input :type="showTgToken ? 'text' : 'password'" x-model="configForm.telegram_bot_token" placeholder="Contoh: 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"
+                   class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono text-[11px] pr-10" />
+          </div>
           <p class="text-[10px] text-slate-500 mt-1">Token bot Telegram untuk pengiriman notifikasi ke Chat ID mahasiswa.</p>
         </div>
+
+        <!-- ID Matkul 2 Minggu Sekali (Kloter Manual) -->
         <div>
           <label class="block text-slate-400 mb-1 font-semibold flex items-center gap-1">
             <i class="fa-solid fa-calendar-days text-amber-400"></i> ID Matkul 2 Minggu Sekali (Kloter Manual)
@@ -416,6 +462,10 @@
         verifyingIndex: null,
         testingWa: false,
         testingTg: false,
+        showPin: false,
+        showFonnteToken: false,
+        showTgToken: false,
+        showNewPass: false,
         _localAlertSent: false,
         accounts: [],
         deviceStatus: {},
@@ -426,7 +476,7 @@
         isEditing: false,
         editIndex: -1,
         modalForm: { name: "", user: "", pass: "", wa_target: "", tg_chat_id: "", is_active: true },
-        configForm: { master_pin: "206265", telegram_bot_token: "", manual_kuliah_ids: "221835, 221847, 221839, 221840" },
+        configForm: { master_pin: "206265", fonnte_token: "", telegram_bot_token: "", manual_kuliah_ids: "221835, 221847, 221839, 221840" },
 
         get lastSeenEpoch() {
           if (this.deviceStatus.last_seen_epoch) {
@@ -542,10 +592,11 @@
             const alertMsg = `🔴 *PERINGATAN: ESP32 OFFLINE (MATI LAMPU / TERPUTUS)*\n\nHardware ESP32 tidak mengirim heartbeat selama >2 menit.\nKemungkinan terjadi *mati lampu di kos* atau *WiFi terputus*.\n\n⏰ *Terakhir Aktif:* ${this.deviceStatus.last_seen || '-'}\n📌 *Status Terakhir:* ${this.deviceStatus.last_status || '-'}\n📚 *Matkul Terakhir:* ${this.deviceStatus.last_checked_matkul || '-'}\n\n_Segera periksa daya listrik / koneksi WiFi di kos._`;
 
             try {
+              const fonnteKey = this.config.fonnte_token || FONNTE_TOKEN;
               await fetch("https://api.fonnte.com/send", {
                 method: "POST",
                 headers: {
-                  "Authorization": FONNTE_TOKEN,
+                  "Authorization": fonnteKey,
                   "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
@@ -583,6 +634,7 @@
 
         openAddAccountModal() {
           this.isEditing = false;
+          this.showNewPass = false;
           this.modalForm = { name: "", user: "", pass: "", wa_target: "", tg_chat_id: "", is_active: true };
           this.showModal = true;
         },
@@ -603,9 +655,13 @@
           }
           this.configForm = {
             master_pin: this.config.master_pin || "206265",
+            fonnte_token: this.config.fonnte_token || FONNTE_TOKEN,
             telegram_bot_token: this.config.telegram_bot_token || "",
             manual_kuliah_ids: ids
           };
+          this.showPin = false;
+          this.showFonnteToken = false;
+          this.showTgToken = false;
           this.showConfigModal = true;
         },
 
@@ -619,6 +675,7 @@
 
             const payload = {
               master_pin: this.configForm.master_pin,
+              fonnte_token: this.configForm.fonnte_token,
               telegram_bot_token: this.configForm.telegram_bot_token,
               manual_kuliah_ids: rawIds
             };
@@ -632,13 +689,17 @@
             this.showConfigModal = false;
             alert("✅ Pengaturan berhasil disimpan!");
           } catch (e) {
-            alert("Gagal menyimpan pengaturan ke Firebase!");
+            alert("Gagal menyimpan pengaturan ke Firebase: " + e.message);
           }
         },
 
         async saveAccount() {
           if (this.isEditing) {
-            this.accounts[this.editIndex] = { ...this.modalForm };
+            const existingPass = this.accounts[this.editIndex].pass;
+            this.accounts[this.editIndex] = {
+              ...this.modalForm,
+              pass: existingPass // Pertahankan password lama
+            };
           } else {
             this.accounts.push({ ...this.modalForm });
           }
@@ -688,10 +749,11 @@
             // 1. WhatsApp via Fonnte
             if (acc.wa_target) {
               try {
+                const fonnteKey = this.config.fonnte_token || FONNTE_TOKEN;
                 const res = await fetch("https://api.fonnte.com/send", {
                   method: "POST",
                   headers: {
-                    "Authorization": FONNTE_TOKEN,
+                    "Authorization": fonnteKey,
                     "Content-Type": "application/json"
                   },
                   body: JSON.stringify({
@@ -850,10 +912,11 @@
           const msg = `🔔 *Test Gateway WhatsApp Fonnte*\n\nKoneksi API Fonnte berhasil terverifikasi dan aktif!\n\n⏰ *Waktu:* ${nowWib} WIB\n📱 *Admin:* ${ADMIN_WA}\n\n_Pesan otomatis dikirim dari Web Dashboard ETHOL Bot._`;
 
           try {
+            const fonnteKey = this.config.fonnte_token || FONNTE_TOKEN;
             const res = await fetch("https://api.fonnte.com/send", {
               method: "POST",
               headers: {
-                "Authorization": FONNTE_TOKEN,
+                "Authorization": fonnteKey,
                 "Content-Type": "application/json"
               },
               body: JSON.stringify({
