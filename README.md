@@ -130,7 +130,9 @@ In your GitHub repository, navigate to **Settings** ➔ **Secrets and variables*
 *(Student accounts and configuration are fetched dynamically from Firebase at runtime).*
 
 ### 3. Flash ESP32 Hardware Scout
-1. Open `firmware-esp32/` using **VS Code** with the **PlatformIO IDE** extension.
+
+#### Option A: PlatformIO (VS Code) — Recommended
+1. Open `firmware-esp32/` in **VS Code** with the **PlatformIO IDE** extension.
 2. Edit `firmware-esp32/src/main.cpp` and update the `Config` namespace with your Wi-Fi and API credentials:
    ```cpp
    namespace Config {
@@ -149,6 +151,12 @@ In your GitHub repository, navigate to **Settings** ➔ **Secrets and variables*
    ```bash
    pio run --target upload
    ```
+
+#### Option B: Arduino IDE (2.x)
+1. In Arduino IDE, install the official ESP32 board package (**Boards Manager** ➔ search `esp32` by *Espressif Systems*).
+2. Install **ArduinoJson (v6.21.x)** via **Library Manager** (`Ctrl + Shift + I`).
+3. Place all `.h`, `.cpp`, and `main.cpp` files into a folder named `authol_e_scout/`, then rename `main.cpp` to `authol_e_scout.ino`.
+4. Open `authol_e_scout.ino` in Arduino IDE, adjust credentials in the `Config` namespace, select **ESP32 Dev Module**, and click **Upload** (Baud: `115200`).
 
 ---
 
