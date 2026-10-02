@@ -7,8 +7,17 @@ on:
     - cron: "*/5 0-13 * * 1,2,3,4,5"
     - cron: "0,5,10,15,20,25,30,35,40,45,50,55 14 * * 1,2,3,4,5"
   workflow_dispatch:  # Trigger manual via Web Dashboard / GitHub UI
-  repository_dispatch:  # Trigger instan via ESP32 Hardware
-    types: [ethol_presensi_trigger]
+    inputs:
+      action:
+        description: 'Action (presensi or verify)'
+        required: false
+        default: 'presensi'
+      target_user:
+        description: 'Target user to verify'
+        required: false
+        default: 'all'
+  repository_dispatch:  # Trigger instan via ESP32 Hardware / Web Dashboard
+    types: [ethol_presensi_trigger, ethol_verify_account]
 
 jobs:
   presensi:
@@ -27,13 +36,16 @@ jobs:
       - name: Install dependencies
         run: pip install requests pytz
 
-      - name: Run ETHOL Bot
+      - name: Run ETHOL Bot / Verifier
         env:
           FONNTE_TOKEN: ${{ secrets.FONNTE_TOKEN }}
           ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
           FIREBASE_URL: "https://ethol-bot-default-rtdb.firebaseio.com"
           JAM_MULAI: "6"
           JAM_SELESAI: "21"
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_ACTION: ${{ github.event.action }}
+          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: |
           python app_actions.py 2>&1 | tee bot_log.txt
 
