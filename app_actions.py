@@ -2,7 +2,7 @@
 ETHOL Presensi Bot - Cloud Parallel Worker
 Mengambil daftar akun aktif langsung dari Firebase Realtime Database,
 menjalankan presensi secara paralel, mencatat log ke Firebase,
-dan mengirimkan notifikasi WhatsApp via Fonnte.
+dan mengirimkan notifikasi multi-channel (WhatsApp via Fonnte & Telegram).
 """
 
 import os
@@ -24,10 +24,11 @@ logging.basicConfig(
 
 WIB = pytz.timezone("Asia/Jakarta")
 
-FIREBASE_URL = os.environ.get("FIREBASE_URL", "https://ethol-bot-default-rtdb.firebaseio.com")
-FONNTE_TOKEN = os.environ.get("FONNTE_TOKEN", "wB7GEFCDTyDLpU2PjNPp")
-JAM_MULAI    = int(os.environ.get("JAM_MULAI", "6"))
-JAM_SELESAI  = int(os.environ.get("JAM_SELESAI", "21"))
+FIREBASE_URL       = os.environ.get("FIREBASE_URL", "https://ethol-bot-default-rtdb.firebaseio.com")
+FONNTE_TOKEN       = os.environ.get("FONNTE_TOKEN", "wB7GEFCDTyDLpU2PjNPp")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+JAM_MULAI          = int(os.environ.get("JAM_MULAI", "6"))
+JAM_SELESAI        = int(os.environ.get("JAM_SELESAI", "21"))
 
 
 def now_wib() -> datetime:
@@ -52,10 +53,22 @@ def log_to_firebase(matkul: str, status: str, message: str):
             "status": status,
             "message": message
         }
-        # Gunakan POST agar otomatis membuat unique ID di /history
         requests.post(f"{FIREBASE_URL}/history.json", json=payload, timeout=10)
     except Exception as e:
         logging.getLogger("FIREBASE").error(f"Gagal simpan log ke Firebase: {e}")
+
+def get_tg_token() -> str:
+    global TELEGRAM_BOT_TOKEN
+    if TELEGRAM_BOT_TOKEN:
+        return TELEGRAM_BOT_TOKEN
+    try:
+        r = requests.get(f"{FIREBASE_URL}/config/telegram_bot_token.json", timeout=5)
+        if r.status_code == 200 and r.json():
+            TELEGRAM_BOT_TOKEN = str(r.json())
+            return TELEGRAM_BOT_TOKEN
+    except Exception:
+        pass
+    return ""
 
 def send_wa(target: str, message: str) -> bool:
     if not FONNTE_TOKEN or not target:
@@ -71,8 +84,36 @@ def send_wa(target: str, message: str) -> bool:
         logging.getLogger("FONNTE").info(f"{'OK' if ok else 'GAGAL'} WA ke {target}: HTTP {r.status_code}")
         return ok
     except Exception as e:
-        logging.getLogger("FONNTE").error(f"Gagal kirim WA: {e}")
+        logging.getLogger("FONNTE").error(f"Gagal kirim WA ke {target}: {e}")
         return False
+
+def send_telegram(chat_id: str, message: str) -> bool:
+    token = get_tg_token()
+    if not token or not chat_id:
+        return False
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": message, "parse_mode": "Markdown"},
+            timeout=15
+        )
+        ok = r.status_code == 200 and r.json().get("ok") is True
+        logging.getLogger("TELEGRAM").info(f"{'OK' if ok else 'GAGAL'} Telegram ke {chat_id}: HTTP {r.status_code}")
+        return ok
+    except Exception as e:
+        logging.getLogger("TELEGRAM").error(f"Gagal kirim Telegram ke {chat_id}: {e}")
+        return False
+
+def notify_client(acc: dict, message_wa: str, message_tg: str = ""):
+    """Mengirim notifikasi ke semua kanal client yang aktif (WhatsApp & Telegram)."""
+    wa = acc.get("wa_target", "")
+    tg = acc.get("tg_chat_id", "")
+    msg_tg = message_tg or message_wa
+
+    if wa:
+        send_wa(wa, message_wa)
+    if tg:
+        send_telegram(tg, msg_tg)
 
 
 def get_active_accounts():
@@ -89,7 +130,6 @@ def get_active_accounts():
     except Exception as e:
         logging.error(f"Gagal fetch akun dari Firebase: {e}")
 
-    # Fallback ke Environment Variable ACCOUNTS_JSON
     fallback_json = os.environ.get("ACCOUNTS_JSON", "[]")
     try:
         raw = json.loads(fallback_json)
@@ -100,9 +140,11 @@ def get_active_accounts():
 
 class AccountWorker:
     def __init__(self, config: dict):
+        self.config     = config
         self.user       = config["user"]
         self.password   = config["pass"]
         self.wa_target  = config.get("wa_target", "")
+        self.tg_chat_id = config.get("tg_chat_id", "")
         self.name       = config.get("name", self.user.split("@")[0])
         self.label      = self.name
         self.log        = logging.getLogger(self.label)
@@ -291,22 +333,24 @@ class AccountWorker:
 
             if sukses:
                 log_to_firebase(matkul, "SUCCESS", f"Presensi berhasil untuk {self.label}")
-                send_wa(self.wa_target, (
-                    f"✅ *Presensi Berhasil!*\\n\\n"
-                    f"👤 *Akun:* {self.label}\\n"
-                    f"📚 *Mata Kuliah:* {matkul}\\n"
-                    f"⏰ *Waktu:* {when}\\n\\n"
+                msg = (
+                    f"✅ *Presensi Berhasil!*\n\n"
+                    f"👤 *Akun:* {self.label}\n"
+                    f"📚 *Mata Kuliah:* {matkul}\n"
+                    f"⏰ *Waktu:* {when}\n\n"
                     f"_Presensi otomatis via ETHOL Bot._"
-                ))
+                )
+                notify_client(self.config, msg)
             else:
                 log_to_firebase(matkul, "FAILED", f"Gagal presensi {self.label}: {pesan}")
-                send_wa(self.wa_target, (
-                    f"⚠️ *Gagal Presensi Otomatis*\\n\\n"
-                    f"👤 *Akun:* {self.label}\\n"
-                    f"📚 *Mata Kuliah:* {matkul}\\n"
-                    f"⏰ *Waktu:* {when}\\n\\n"
+                msg = (
+                    f"⚠️ *Gagal Presensi Otomatis*\n\n"
+                    f"👤 *Akun:* {self.label}\n"
+                    f"📚 *Mata Kuliah:* {matkul}\n"
+                    f"⏰ *Waktu:* {when}\n\n"
                     f"_{pesan or 'server tidak memberi pesan'} — segera presensi manual._"
-                ))
+                )
+                notify_client(self.config, msg)
         except Exception as e:
             self.log.error(f"Exception run_once: {e}")
 
@@ -316,7 +360,6 @@ def run_worker(config):
 
 
 def main():
-    # Cek apakah manual trigger atau schedule
     accounts = get_active_accounts()
     if not accounts:
         logging.warning("Tidak ada akun aktif di Firebase / ACCOUNTS_JSON!")
@@ -329,7 +372,7 @@ def main():
         t = threading.Thread(target=run_worker, args=(acc,), name=acc.get("name", acc["user"].split("@")[0]))
         t.start()
         threads.append(t)
-        time.sleep(2)  # stagger 2 detik antar akun
+        time.sleep(2)
 
     for t in threads:
         t.join(timeout=120)
