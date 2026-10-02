@@ -2,13 +2,13 @@ name: ETHOL Presensi Bot
 
 on:
   schedule:
-    # Setiap 5 menit, Senin-Jumat jam 06:00-21:00 WIB (UTC+7 = UTC-7 jam)
-    # GitHub Actions cron dalam UTC: WIB 06:00 = UTC 23:00 (hari sebelumnya)
-    # WIB 21:00 = UTC 14:00
-    - cron: "*/5 23-23 * * 0,1,2,3,4"   # WIB 06:00 (UTC 23:xx hari sebelumnya)
-    - cron: "*/5 0-13 * * 1,2,3,4,5"    # WIB 07:00-20:xx (UTC 00:xx-13:xx)
-    - cron: "0,5,10,15,20,25,30,35,40,45,50,55 14 * * 1,2,3,4,5"  # WIB 21:00 (UTC 14:xx)
-  workflow_dispatch:  # Bisa dijalankan manual dari GitHub
+    # Fallback Cron setiap 5 menit jam kuliah WIB
+    - cron: "*/5 23-23 * * 0,1,2,3,4"
+    - cron: "*/5 0-13 * * 1,2,3,4,5"
+    - cron: "0,5,10,15,20,25,30,35,40,45,50,55 14 * * 1,2,3,4,5"
+  workflow_dispatch:  # Trigger manual via Web Dashboard / GitHub UI
+  repository_dispatch:  # Trigger instan via ESP32 Hardware
+    types: [ethol_presensi_trigger]
 
 jobs:
   presensi:
@@ -31,6 +31,7 @@ jobs:
         env:
           FONNTE_TOKEN: ${{ secrets.FONNTE_TOKEN }}
           ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+          FIREBASE_URL: "https://ethol-bot-default-rtdb.firebaseio.com"
           JAM_MULAI: "6"
           JAM_SELESAI: "21"
         run: |
