@@ -67,9 +67,9 @@
         <div>
           <h1 class="text-xl font-bold text-white flex items-center gap-2">
             ETHOL Bot Dashboard
-            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Hybrid v2.0</span>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Hybrid Realtime</span>
           </h1>
-          <p class="text-xs text-slate-400">ESP32 Scout Worker ➔ GitHub Actions Cloud Exec</p>
+          <p class="text-xs text-slate-400">ESP32 Scout Worker ➔ Firebase Sync ➔ Cloud Exec</p>
         </div>
       </div>
       
@@ -119,7 +119,7 @@
       <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Fonnte WhatsApp</span>
-          <button @click="testWhatsApp()" class="text-xs text-indigo-400 hover:underline">Test WA</button>
+          <span class="text-xs text-emerald-400 font-semibold">Active</span>
         </div>
         <p class="text-lg font-bold text-emerald-400 flex items-center gap-2">
           <i class="fa-brands fa-whatsapp text-xl"></i>
@@ -279,8 +279,6 @@
   <!-- LOGIC SCRIPT -->
   <script>
     const FIREBASE_URL = "https://ethol-bot-default-rtdb.firebaseio.com";
-    const GITHUB_TOKEN = "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";
-    const GITHUB_REPO  = "viefemm/ethol-bot";
 
     function app() {
       return {
@@ -298,7 +296,6 @@
         modalForm: { name: "", user: "", pass: "", wa_target: "", is_active: true },
 
         get isEspOnline() {
-          // Check if last seen was in the last 2 minutes
           return this.deviceStatus.esp32_online === true;
         },
 
@@ -338,7 +335,6 @@
 
         startRealtimeSync() {
           this.loadData();
-          // Polling updates every 3 seconds for instant realtime feel
           setInterval(() => {
             if (this.isAuthenticated) this.loadData();
           }, 3000);
@@ -357,7 +353,7 @@
             this.deviceStatus = (await devRes.json()) || {};
             const rawHist = await histRes.json();
             this.history = Array.isArray(rawHist) ? rawHist : (rawHist ? Object.values(rawHist) : []);
-            this.history.reverse(); // Newest first
+            this.history.reverse();
           } catch (e) {
             console.error("Error loading data:", e);
           }
@@ -411,45 +407,15 @@
         },
 
         async triggerCloudPresensi() {
-          if (!confirm("Jalankan bot presensi di cloud sekarang untuk semua akun yang aktif?")) return;
+          if (!confirm("Kirim instruksi trigger ke ESP32 & Cloud sekarang?")) return;
           this.actionLoading = true;
           try {
-            const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/presensi.yml/dispatches`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${GITHUB_TOKEN}`,
-                'Accept': 'application/vnd.github+json'
-              },
-              body: JSON.stringify({ ref: 'main' })
+            await fetch(`${FIREBASE_URL}/device_status/manual_trigger.json`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(true)
             });
-            if (res.ok) {
-              alert("✅ Trigger Cloud Berhasil! Presensi sedang dieksekusi di GitHub Actions.");
-            } else {
-              alert("❌ Gagal trigger GitHub Actions.");
-            }
-          } catch (e) {
-            alert("Error: " + e.message);
-          } finally {
-            this.actionLoading = false;
-          }
-        },
-
-        async testWhatsApp() {
-          this.actionLoading = true;
-          try {
-            const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/test_fonnte.yml/dispatches`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${GITHUB_TOKEN}`,
-                'Accept': 'application/vnd.github+json'
-              },
-              body: JSON.stringify({ ref: 'main' })
-            });
-            if (res.ok) {
-              alert("✅ Pesan uji coba WA sedang dikirim ke semua akun aktif!");
-            } else {
-              alert("❌ Gagal memicu test WA.");
-            }
+            alert("✅ Perintah trigger terkirim realtime ke Firebase!");
           } catch (e) {
             alert("Error: " + e.message);
           } finally {
