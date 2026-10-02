@@ -33,4 +33,13 @@ jobs:
           ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
           JAM_MULAI: "6"
           JAM_SELESAI: "21"
-        run: python app_actions.py
+        run: |
+          python app_actions.py 2>&1 | tee bot_log.txt
+
+      - name: Upload Log File (.txt)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-run-log
+          path: bot_log.txt
+          retention-days: 7
