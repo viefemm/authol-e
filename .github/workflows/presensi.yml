@@ -1,11 +1,6 @@
 name: ETHOL Presensi Bot
 
 on:
-  schedule:
-    # Fallback Cron setiap 5 menit jam kuliah WIB
-    - cron: "*/5 23-23 * * 0,1,2,3,4"
-    - cron: "*/5 0-13 * * 1,2,3,4,5"
-    - cron: "0,5,10,15,20,25,30,35,40,45,50,55 14 * * 1,2,3,4,5"
   workflow_dispatch:  # Trigger manual via Web Dashboard / GitHub UI
     inputs:
       action:
@@ -16,7 +11,7 @@ on:
         description: 'Target user to verify'
         required: false
         default: 'all'
-  repository_dispatch:  # Trigger instan via ESP32 Hardware / Web Dashboard
+  repository_dispatch:  # Trigger instan On-Demand via ESP32 Hardware / Web Dashboard
     types: [ethol_presensi_trigger, ethol_verify_account]
 
 jobs:
