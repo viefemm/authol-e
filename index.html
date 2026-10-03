@@ -3,159 +3,154 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ETHOL Bot Controller</title>
-  <link rel="icon" href="https://ethol.pens.ac.id/favicon.ico" />
+  <title>ETHOL Bot Dashboard</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Font Awesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <!-- Alpine.js -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: { 50: '#eef2ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' }
-          }
-        }
-      }
-    }
-  </script>
+  <!-- Inter Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
+    body { font-family: 'Inter', sans-serif; }
     [x-cloak] { display: none !important; }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-indigo-500 selection:text-white"
-      x-data="app()" x-init="initApp()" x-cloak>
+<body class="bg-slate-950 text-slate-100 min-h-screen pb-12" x-data="app()" x-init="initApp()" x-cloak>
 
-  <!-- LOGIN MODAL / GATE -->
-  <div x-show="!isAuthenticated" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md px-4">
-    <div class="bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center">
-      <div class="w-16 h-16 bg-indigo-600/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-indigo-500/30">
-        <i class="fa-solid fa-shield-halved text-2xl"></i>
+  <!-- AUTH / PIN SCREEN -->
+  <div x-show="!isAuthenticated" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950 px-4">
+    <div class="bg-slate-900 border border-slate-800 p-8 rounded-2xl max-w-sm w-full shadow-2xl text-center space-y-6">
+      <div class="inline-flex p-4 rounded-2xl bg-indigo-600/10 text-indigo-400 border border-indigo-500/20">
+        <i class="fa-solid fa-lock text-3xl"></i>
       </div>
-      <h2 class="text-2xl font-bold text-white mb-1">ETHOL Bot Controller</h2>
-      <p class="text-slate-400 text-sm mb-6">Masukkan PIN Master untuk mengelola akun dan bot.</p>
-      
-      <form @submit.prevent="verifyPin()">
-        <div class="mb-4">
-          <input type="password" x-model="pinInput" placeholder="••••••" autofocus
-                 class="w-full text-center tracking-widest text-2xl px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 text-white placeholder-slate-600" />
-          <p x-show="pinError" class="text-rose-400 text-xs mt-2" x-text="pinError"></p>
+      <div>
+        <h2 class="text-xl font-bold text-white tracking-tight">ETHOL Bot Controller</h2>
+        <p class="text-xs text-slate-400 mt-1">Masukkan Master PIN untuk mengakses panel kontrol</p>
+      </div>
+
+      <form @submit.prevent="verifyPin()" class="space-y-4">
+        <div>
+          <input type="password" x-model="pinInput" maxlength="10" placeholder="••••••" autofocus
+                 class="w-full text-center text-2xl font-mono tracking-widest px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 transition" />
+          <p x-show="pinError" class="text-rose-400 text-xs mt-2 font-medium" x-text="pinError"></p>
         </div>
         <button type="submit" :disabled="loading"
-                class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition flex items-center justify-center gap-2">
-          <i class="fa-solid fa-lock-open" x-show="!loading"></i>
+                class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-50">
+          <i class="fa-solid fa-arrow-right-to-bracket" x-show="!loading"></i>
           <i class="fa-solid fa-spinner fa-spin" x-show="loading"></i>
-          <span>Buka Dashboard</span>
+          <span>Buka Panel</span>
         </button>
       </form>
     </div>
   </div>
 
   <!-- MAIN DASHBOARD -->
-  <div x-show="isAuthenticated" class="max-w-6xl mx-auto px-4 py-6 md:py-10 space-y-6">
-
+  <div x-show="isAuthenticated" class="max-w-4xl mx-auto px-4 pt-6 space-y-6">
+    
     <!-- HEADER -->
-    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800/80 p-5 rounded-2xl backdrop-blur">
+    <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800/80 p-5 rounded-2xl backdrop-blur-md">
       <div class="flex items-center gap-3">
-        <div class="w-12 h-12 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
-          <i class="fa-solid fa-robot text-xl text-white"></i>
+        <div class="p-3 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+          <i class="fa-solid fa-robot text-2xl"></i>
         </div>
         <div>
-          <h1 class="text-xl font-bold text-white flex items-center gap-2">
-            ETHOL Bot Dashboard
-            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Hybrid Realtime</span>
-          </h1>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold text-white">ETHOL Bot Dashboard</h1>
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">Hybrid Realtime</span>
+          </div>
           <p class="text-xs text-slate-400">ESP32 Scout Worker ➔ Firebase Sync ➔ Cloud Exec</p>
         </div>
       </div>
-      
-      <div class="flex items-center gap-2">
-        <button @click="openConfigModal()" title="Pengaturan Token"
+
+      <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
+        <button title="Pengaturan Sistem" @click="openConfigModal()"
                 class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
           <i class="fa-solid fa-gear"></i>
           <span>Pengaturan</span>
         </button>
-        <button @click="triggerCloudPresensi()" :disabled="actionLoading"
-                class="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold flex items-center gap-2 transition">
-          <i class="fa-solid fa-bolt" :class="{'fa-spin': actionLoading}"></i>
-          <span>Trigger Presensi</span>
+        <button title="Trigger Eksekusi Presensi Manual" @click="triggerManualPresensi()" :disabled="actionLoading"
+                class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-indigo-600/20 transition disabled:opacity-50">
+          <i class="fa-solid fa-bolt" :class="actionLoading ? 'animate-bounce' : ''"></i>
+          <span x-text="actionLoading ? 'Memicu...' : 'Trigger Presensi'"></span>
         </button>
-        <button @click="logout()" title="Logout"
-                class="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs border border-slate-700 transition">
+        <button title="Keluar" @click="logout()"
+                class="p-2 bg-slate-800 hover:bg-rose-600/20 hover:text-rose-400 text-slate-400 border border-slate-700 rounded-xl text-xs transition">
           <i class="fa-solid fa-arrow-right-from-bracket"></i>
         </button>
       </div>
     </header>
 
-    <!-- STATUS BANNER & METRICS -->
+    <!-- STATUS OVERVIEW CARDS -->
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <!-- ESP32 STATUS -->
-      <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">ESP32 Hardware</span>
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                :class="isEspOnline ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'">
-            <span class="w-2 h-2 rounded-full" :class="isEspOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'"></span>
+      <!-- Card Hardware Status -->
+      <div class="bg-slate-900/40 border border-slate-800/80 p-4 rounded-2xl flex flex-col justify-between">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+          <span>ESP32 HARDWARE</span>
+          <span class="flex items-center gap-1.5 font-bold"
+                :class="isEspOnline ? 'text-emerald-400' : 'text-rose-400'">
+            <span class="h-2 w-2 rounded-full" :class="isEspOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'"></span>
             <span x-text="isEspOnline ? 'ONLINE' : 'OFFLINE'"></span>
           </span>
         </div>
-        <p class="text-lg font-bold text-white truncate" x-text="isEspOnline ? (deviceStatus.last_checked_matkul || 'Standby') : 'Hardware Offline / Mati'"></p>
-        <p class="text-xs text-slate-500 mt-1" x-text="pingStatusText"></p>
+        <div class="mt-1">
+          <h3 class="text-sm font-semibold text-white truncate" x-text="deviceStatus.last_checked_matkul || '-'"></h3>
+          <p class="text-[11px] text-slate-400 mt-0.5" x-text="pingStatusText"></p>
+        </div>
       </div>
 
-      <!-- ACTIVE ACCOUNTS -->
-      <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Akun Aktif</span>
-          <i class="fa-solid fa-users text-indigo-400"></i>
+      <!-- Card Akun Aktif -->
+      <div class="bg-slate-900/40 border border-slate-800/80 p-4 rounded-2xl flex flex-col justify-between">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+          <span>AKUN AKTIF</span>
+          <i class="fa-solid fa-users text-slate-500"></i>
         </div>
-        <div class="flex items-baseline gap-2">
-          <span class="text-2xl font-bold text-white" x-text="accounts.filter(a => a.is_active).length"></span>
-          <span class="text-xs text-slate-400" x-text="'dari ' + accounts.length + ' total akun'"></span>
+        <div class="mt-1">
+          <div class="flex items-baseline gap-1.5">
+            <span class="text-xl font-bold text-white" x-text="accounts.filter(a => a.is_active).length"></span>
+            <span class="text-xs text-slate-400" x-text="'dari ' + accounts.length + ' total akun'"></span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-0.5">Hanya akun aktif yang diabsenkan</p>
         </div>
-        <p class="text-xs text-slate-500 mt-1">Hanya akun aktif yang diabsenkan</p>
       </div>
 
-      <!-- NOTIFICATION CHANNELS -->
-      <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Notifikasi Client</span>
-          <span class="text-xs text-emerald-400 font-semibold">Multi-Channel</span>
+      <!-- Card Notifikasi Multi-Channel -->
+      <div class="bg-slate-900/40 border border-slate-800/80 p-4 rounded-2xl flex flex-col justify-between">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+          <span>NOTIFIKASI CLIENT</span>
+          <span class="text-[10px] font-semibold text-indigo-400">Multi-Channel</span>
         </div>
-        <div class="flex items-center gap-2.5 mt-1">
-          <button @click.stop.prevent="testWhatsAppChannel()" :disabled="testingWa"
-                  class="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 px-3 py-1.5 rounded-lg border border-emerald-500/30 font-semibold transition cursor-pointer disabled:opacity-50"
-                  title="Klik untuk test koneksi WhatsApp Fonnte">
-            <i class="fa-brands fa-whatsapp text-sm" :class="{'fa-spin': testingWa}"></i>
-            <span x-text="testingWa ? 'Testing...' : 'Test WA'"></span>
-          </button>
-          <button @click.stop.prevent="testTelegramChannel()" :disabled="testingTg"
-                  class="flex items-center gap-1.5 text-xs text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 active:scale-95 px-3 py-1.5 rounded-lg border border-sky-500/30 font-semibold transition cursor-pointer disabled:opacity-50"
-                  title="Klik untuk test token Telegram Bot">
-            <i class="fa-brands fa-telegram text-sm" :class="{'fa-spin': testingTg}"></i>
-            <span x-text="testingTg ? 'Testing...' : 'Test Telegram'"></span>
-          </button>
+        <div class="mt-1">
+          <div class="flex items-center gap-2">
+            <button @click.stop.prevent="testWhatsAppChannel()" :disabled="testingWa"
+                    class="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition">
+              <i class="fa-brands fa-whatsapp text-sm" :class="testingWa ? 'fa-spin' : ''"></i>
+              <span>Test WA</span>
+            </button>
+            <button @click.stop.prevent="testTelegramChannel()" :disabled="testingTg"
+                    class="px-2.5 py-1 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition">
+              <i class="fa-brands fa-telegram text-sm" :class="testingTg ? 'fa-spin' : ''"></i>
+              <span>Test Telegram</span>
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Klik tombol di atas untuk test gateway WA & Tele</p>
         </div>
-        <p class="text-xs text-slate-500 mt-2">Klik tombol di atas untuk test gateway WA & Tele</p>
       </div>
     </div>
 
-    <!-- ACCOUNTS SECTION -->
-    <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-6">
-      <div class="flex items-center justify-between mb-6">
+    <!-- SECTION: DAFTAR AKUN MAHASISWA -->
+    <div class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+          <h2 class="text-sm font-bold text-white flex items-center gap-2">
             <i class="fa-solid fa-address-card text-indigo-400"></i>
             Daftar Akun Mahasiswa
           </h2>
-          <p class="text-xs text-slate-400">Gunakan tombol <b>Test Client</b> untuk memverifikasi koneksi notifikasi WhatsApp & Telegram per akun.</p>
+          <p class="text-xs text-slate-400 mt-0.5">Gunakan tombol Test Client untuk memverifikasi koneksi notifikasi WhatsApp & Telegram per akun.</p>
         </div>
         <button @click="openAddAccountModal()"
-                class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-lg shadow-indigo-600/20">
+                class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
           <i class="fa-solid fa-plus"></i>
           <span>Tambah Akun</span>
         </button>
@@ -256,27 +251,27 @@
       </div>
     </div>
 
-    <!-- ACTIVITY & ATTENDANCE LOG -->
-    <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-6">
-      <div class="flex items-center justify-between mb-4">
+    <!-- SECTION: RIWAYAT AKTIVITAS & LOG REALTIME -->
+    <div class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+          <h2 class="text-sm font-bold text-white flex items-center gap-2">
             <i class="fa-solid fa-clock-rotate-left text-indigo-400"></i>
             Riwayat Presensi & Log
           </h2>
-          <p class="text-xs text-slate-400">Log aktivitas realtime dari ESP32, Cloud Worker, dan Client Test.</p>
+          <p class="text-xs text-slate-400 mt-0.5">Log aktivitas realtime dari ESP32, Cloud Worker, dan Client Test.</p>
         </div>
-        <button @click="loadData()" class="p-2 text-slate-400 hover:text-white transition" title="Refresh">
-          <i class="fa-solid fa-rotate-right" :class="{'fa-spin': loading}"></i>
+        <button @click="loadData()" class="text-slate-400 hover:text-white text-xs transition">
+          <i class="fa-solid fa-rotate-right"></i>
         </button>
       </div>
 
       <div class="overflow-x-auto">
-        <table class="w-full text-left text-xs text-slate-300">
-          <thead class="bg-slate-800/60 text-slate-400 uppercase font-semibold border-b border-slate-700/60">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-800/40 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
             <tr>
               <th class="px-4 py-3">Waktu</th>
-              <th class="px-4 py-3">Mata Kuliah / Event</th>
+              <th class="px-4 py-3">Matakuliah</th>
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Detail</th>
             </tr>
@@ -340,7 +335,7 @@
           <label class="block text-slate-400 mb-1 font-semibold flex items-center gap-1">
             <i class="fa-brands fa-whatsapp text-emerald-400"></i> No. WhatsApp (Fonnte)
           </label>
-          <input type="text" x-model="modalForm.wa_target" placeholder="Contoh: 6285175062616 (kosongkan jika tidak pakai)"
+          <input type="text" x-model="modalForm.wa_target" placeholder="Contoh: 6281234567890 (kosongkan jika tidak pakai)"
                  class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
         </div>
         <div>
@@ -432,9 +427,10 @@
 
   <!-- LOGIC SCRIPT -->
   <script>
-    const FIREBASE_URL = "https://ethol-bot-default-rtdb.firebaseio.com";
-    const FONNTE_TOKEN = "wB7GEFCDTyDLpU2PjNPp";
-    const ADMIN_WA     = "6285175062616";
+    // Konfigurasi Dasar Firebase & Gateway
+    const FIREBASE_URL = "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com";
+    const FONNTE_TOKEN = "YOUR_FONNTE_TOKEN";
+    const ADMIN_WA     = "628xxxxxxxxxx";
 
     function app() {
       return {
@@ -509,7 +505,7 @@
           try {
             const res = await fetch(`${FIREBASE_URL}/config/master_pin.json`);
             const correctPin = await res.json();
-            if (this.pinInput === String(correctPin) || this.pinInput === "206265") {
+            if (this.pinInput === String(correctPin) || this.pinInput === "123456") {
               localStorage.setItem("ethol_pin", this.pinInput);
               this.isAuthenticated = true;
               this.startRealtimeSync();
@@ -561,7 +557,6 @@
         },
 
         async checkWatchdogAlert() {
-          // Jangan kirim watchdog saat sedang proses test client
           if (this.testingIndex !== null) return;
 
           const epoch = this.lastSeenEpoch;
@@ -569,7 +564,6 @@
           const nowEpoch = Math.floor(Date.now() / 1000);
           const diffSeconds = nowEpoch - epoch;
 
-          // Jika mati lebih dari 120 detik dan belum pernah dikirim alert offline
           if (diffSeconds > 120 && !this.deviceStatus.offline_alert_sent && !this._localAlertSent) {
             this._localAlertSent = true;
             console.warn("Watchdog: ESP32 Offline detected, sending alert to admin...");
@@ -650,7 +644,6 @@
 
         async saveConfig() {
           try {
-            // Format ID matkul manual
             const rawIds = (this.configForm.manual_kuliah_ids || "")
               .split(",")
               .map(s => s.trim())
@@ -705,7 +698,6 @@
         },
 
         async testClientNotification(index) {
-          // Strict single-action lock: cegah duplicate click
           if (this.testingIndex !== null) return;
 
           const acc = this.accounts[index];
@@ -808,12 +800,8 @@
           const labelName = acc.name || userEmail.split("@")[0];
 
           try {
-            // 1. Reset hasil verifikasi sebelumnya di Firebase
-            await fetch(`${FIREBASE_URL}/verify_result.json`, {
-              method: "DELETE"
-            });
+            await fetch(`${FIREBASE_URL}/verify_result.json`, { method: "DELETE" });
 
-            // 2. Tulis permintaan verifikasi PENDING ke Firebase
             await fetch(`${FIREBASE_URL}/verify_request.json`, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
@@ -824,9 +812,8 @@
               })
             });
 
-            // 3. Trigger GitHub Actions via Repository Dispatch API
             const ghToken = this.config.github_token || "";
-            const ghRepo = "viefemm/ethol-bot";
+            const ghRepo = this.config.github_repo || "YOUR_GITHUB_USERNAME/YOUR_REPO";
             
             if (ghToken) {
               try {
@@ -850,7 +837,6 @@
               }
             }
 
-            // 4. Polling Firebase untuk menunggu hasil verifikasi dari Cloud Runner (maks 25 detik)
             let verifiedResult = null;
             for (let i = 0; i < 12; i++) {
               await new Promise(r => setTimeout(r, 2000));
@@ -941,35 +927,59 @@
             const res = await fetch(`https://api.telegram.org/bot${tgToken}/getMe`);
             const data = await res.json();
             if (data.ok === true) {
-              const botInfo = data.result;
-              alert(`✅ Bot Telegram Terhubung!\n\n🤖 Nama Bot: ${botInfo.first_name}\n🔗 Username: @${botInfo.username}\n🆔 Bot ID: ${botInfo.id}\n\nGateway Telegram siap digunakan untuk notifikasi.`);
+              const botUser = data.result.username || data.result.first_name;
+              alert(`✅ Bot Telegram Terhubung!\n\nNama Bot: @${botUser}\nID Bot: ${data.result.id}\nStatus: Siap mengirim notifikasi presensi.`);
             } else {
-              alert(`❌ Token Telegram Tidak Valid: ${data.description || "Gagal verifikasi token"}\n\nSilakan periksa kembali di menu Pengaturan.`);
+              alert(`❌ Token Telegram Bot Tidak Valid:\n${data.description || "Gagal otentikasi bot."}`);
             }
           } catch (e) {
-            alert("❌ Gagal menghubungi API Telegram: " + e.message);
+            alert("❌ Gagal terhubung ke Telegram API: " + e.message);
           } finally {
             this.testingTg = false;
           }
         },
 
-        async triggerCloudPresensi() {
-          if (!confirm("Kirim instruksi trigger ke ESP32 & Cloud sekarang?")) return;
+        async triggerManualPresensi() {
+          if (this.actionLoading) return;
+          if (!confirm("Jalankan presensi manual sekarang untuk semua akun aktif?")) return;
+
           this.actionLoading = true;
           try {
-            await fetch(`${FIREBASE_URL}/device_status/manual_trigger.json`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(true)
-            });
-            alert("✅ Perintah trigger terkirim realtime ke Firebase!");
+            // Cek apakah ESP32 online untuk mendelegasikan trigger
+            if (this.isEspOnline) {
+              await fetch(`${FIREBASE_URL}/device_status/manual_trigger.json`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(true)
+              });
+              alert("⚡ Sinyal trigger dikirim ke ESP32 Hardware. Cloud Worker akan segera diproses!");
+            } else {
+              // Jika ESP32 mati, pemicuan langsung ke GitHub Actions via Dispatch API
+              const ghToken = this.config.github_token || "";
+              const ghRepo = this.config.github_repo || "YOUR_GITHUB_USERNAME/YOUR_REPO";
+              if (ghToken) {
+                await fetch(`https://api.github.com/repos/${ghRepo}/dispatches`, {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${ghToken}`,
+                    "Accept": "application/vnd.github.v3+json",
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({ event_type: "ethol_presensi_trigger" })
+                });
+                alert("⚡ ESP32 Offline: Trigger manual berhasil dikirim langsung ke GitHub Actions!");
+              } else {
+                alert("⚠️ ESP32 sedang offline dan GitHub Token belum tersimpan di Firebase config.");
+              }
+            }
+            await this.loadData();
           } catch (e) {
-            alert("Error: " + e.message);
+            alert("Gagal memicu presensi: " + e.message);
           } finally {
             this.actionLoading = false;
           }
         }
-      }
+      };
     }
   </script>
 </body>
