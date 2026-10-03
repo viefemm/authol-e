@@ -4,10 +4,11 @@ Mengambil daftar akun aktif langsung dari Firebase Realtime Database,
 menjalankan presensi secara paralel, memverifikasi akun ETHOL / MIS CAS,
 mencatat log ke Firebase, mengirimkan notifikasi multi-channel (WhatsApp via Fonnte & Telegram),
 dan memantau kesehatan ESP32 (Cloud Watchdog).
-Dilengkapi perlindungan:
-- Zero Fail-Silent di setiap titik kegagalan
-- Deteksi presensi manual (jika sudah absen duluan)
-- Filter khusus matakuliah sistem kloter 2 mingguan (221835, 221847, 221839, 221840)
+
+Fitur:
+- Zero Fail-Silent di setiap titik kegagalan (Login MIS, SSO ETHOL, Sesi Presensi)
+- Deteksi presensi manual (jika mahasiswa sudah melakukan presensi manual sebelumnya)
+- Filter khusus matakuliah sistem kloter 2 mingguan (mengirim peringatan jadwal kloter)
 """
 
 import os
@@ -29,14 +30,14 @@ logging.basicConfig(
 
 WIB = pytz.timezone("Asia/Jakarta")
 
-FIREBASE_URL       = os.environ.get("FIREBASE_URL", "")
+FIREBASE_URL       = os.environ.get("FIREBASE_URL", "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com")
 FONNTE_TOKEN       = os.environ.get("FONNTE_TOKEN", "")
 ADMIN_WA           = os.environ.get("ADMIN_WA", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 JAM_MULAI          = int(os.environ.get("JAM_MULAI", "6"))
 JAM_SELESAI        = int(os.environ.get("JAM_SELESAI", "21"))
 
-# Matakuliah khusus 2 minggu sekali (Sistem Kloter) yang memerlukan presensi manual
+# Daftar bawaan ID matakuliah 2 minggu sekali (Sistem Kloter / Shift)
 DEFAULT_MANUAL_KULIAH_IDS = ["221835", "221847", "221839", "221840"]
 
 
@@ -79,8 +80,21 @@ def get_tg_token() -> str:
         pass
     return ""
 
+def get_fonnte_token() -> str:
+    global FONNTE_TOKEN
+    if FONNTE_TOKEN:
+        return FONNTE_TOKEN
+    try:
+        r = requests.get(f"{FIREBASE_URL}/config/fonnte_token.json", timeout=5)
+        if r.status_code == 200 and r.json():
+            FONNTE_TOKEN = str(r.json())
+            return FONNTE_TOKEN
+    except Exception:
+        pass
+    return FONNTE_TOKEN
+
 def get_manual_kuliah_ids() -> list:
-    """Mengambil daftar ID matakuliah sistem kloter 2 mingguan."""
+    """Mengambil daftar ID matakuliah sistem kloter 2 mingguan dari Firebase."""
     try:
         r = requests.get(f"{FIREBASE_URL}/config/manual_kuliah_ids.json", timeout=5)
         if r.status_code == 200 and r.json():
@@ -99,19 +113,6 @@ def is_already_present_msg(msg_str: str) -> bool:
         return False
     lower = msg_str.lower()
     return ("sudah" in lower and any(w in lower for w in ["presensi", "absen", "isi", "mengisi", "ada", "tercatat", "terdaftar"])) or ("already" in lower)
-
-def get_fonnte_token() -> str:
-    global FONNTE_TOKEN
-    if FONNTE_TOKEN:
-        return FONNTE_TOKEN
-    try:
-        r = requests.get(f"{FIREBASE_URL}/config/fonnte_token.json", timeout=5)
-        if r.status_code == 200 and r.json():
-            FONNTE_TOKEN = str(r.json())
-            return FONNTE_TOKEN
-    except Exception:
-        pass
-    return FONNTE_TOKEN
 
 def send_wa(target: str, message: str) -> bool:
     token = get_fonnte_token()
@@ -171,7 +172,7 @@ def check_esp32_offline_watchdog():
         alert_sent = dev.get("offline_alert_sent", False)
         now_epoch = int(time.time())
 
-        # Fallback jika epoch belum tersimpan tapi string ada
+        # Fallback jika epoch belum tersimpan tapi string timestamp ada
         if not last_epoch and dev.get("last_seen"):
             try:
                 raw = dev["last_seen"].replace(" WIB", "").strip()
@@ -182,7 +183,7 @@ def check_esp32_offline_watchdog():
                 pass
 
         # Jika > 120 detik tidak ada heartbeat dan belum ada notif offline dikirim
-        if last_epoch and (now_epoch - last_epoch > 120) and not alert_sent:
+        if last_epoch and (now_epoch - last_epoch > 120) and not alert_sent and ADMIN_WA:
             logging.warning("⚠️ ESP32 terdeteksi OFFLINE! Mengirim notifikasi darurat ke Admin...")
             msg = (
                 f"🔴 *PERINGATAN: ESP32 OFFLINE (MATI LAMPU / TERPUTUS)*\n\n"
@@ -238,118 +239,85 @@ class AccountWorker:
         self.student_name   = ""
         self.student_email  = ""
 
-    def _mis_login(self) -> bool:
-        self.log.info("Login MIS CAS...")
+    def _login_ethol_sso(self) -> bool:
+        """Melakukan autentikasi SSO CAS resmi langsung ke server ETHOL PENS."""
+        self.log.info("Autentikasi SSO ETHOL via CAS...")
         try:
-            cas_url = "https://online.mis.pens.ac.id/index.php?Login=1&halAwal=1"
-            body = ""
-            for _ in range(6):
-                r = self.session.get(cas_url, allow_redirects=False, timeout=15)
-                if r.status_code in (301, 302, 303, 307):
-                    loc = r.headers.get("Location", cas_url)
-                    if loc.startswith("/"):
-                        loc = "https://login.pens.ac.id" + loc
-                    cas_url = loc
-                    continue
-                if r.status_code == 200:
-                    body = r.text
-                break
-
-            if not body:
-                self.log.error("Login gagal: body kosong")
-                return False
-
-            lt_match     = re.search(r'name="lt"\s+value="([^"]+)"', body)
-            action_match = re.search(r'action="([^"]+)"', body)
-            if not lt_match or not action_match:
-                self.log.error("Login gagal: lt/action tidak ditemukan")
-                return False
-
-            lt     = lt_match.group(1)
-            action = action_match.group(1)
-            if action.startswith("/"):
-                parsed = urlparse(cas_url)
-                action = f"{parsed.scheme}://{parsed.netloc}{action}"
-
-            payload = {
-                "username": self.user, "password": self.password,
-                "lt": lt, "_eventId": "submit", "submit": "LOGIN"
-            }
-            r2 = self.session.post(action, data=payload, allow_redirects=False,
-                                   headers={"Referer": cas_url}, timeout=15)
-            loc = r2.headers.get("Location", "")
-            if "ticket=ST-" not in loc:
-                self.log.error("Login gagal: tidak ada ticket ST-")
-                return False
-
-            cur = loc
-            for _ in range(6):
-                r3 = self.session.get(cur, allow_redirects=False, timeout=15)
-                if r3.status_code in (301, 302, 303, 307):
-                    next_loc = r3.headers.get("Location", "")
-                    if next_loc.startswith("/"):
-                        parsed = urlparse(cur)
-                        next_loc = f"{parsed.scheme}://{parsed.netloc}{next_loc}"
-                    cur = next_loc
-                    continue
-                break
-
-            self.log.info("✅ Login MIS berhasil")
-            return True
-        except Exception as e:
-            self.log.error(f"Exception login MIS: {e}")
-            return False
-
-    def _ethol_sso(self) -> bool:
-        self.log.info("SSO ETHOL...")
-        try:
+            # 1. Inisiasi alur SSO CAS langsung dari endpoint resmi ETHOL
             r1 = self.session.get("https://ethol.pens.ac.id/api/auth/cas-redirect",
                                   allow_redirects=False, timeout=15)
-            if r1.status_code not in (301, 302, 303, 307):
+            cas_login_url = r1.headers.get("Location", "")
+            if not cas_login_url:
+                self.log.error("Gagal mendapatkan redirect CAS dari ETHOL")
                 return False
 
-            cas_loc = r1.headers.get("Location", "")
-            r2 = self.session.get(cas_loc, allow_redirects=False, timeout=15)
-            if r2.status_code == 200:
-                return False
-            if r2.status_code not in (301, 302, 303, 307):
+            # 2. Ambil halaman login CAS untuk mendapatkan token lt dan URL action
+            r2 = self.session.get(cas_login_url, allow_redirects=False, timeout=15)
+            body = r2.text
+            lt_match = re.search(r'name="lt"\s+value="([^"]+)"', body)
+            action_match = re.search(r'action="([^"]+)"', body)
+            if not lt_match or not action_match:
+                self.log.error("Token lt / action form tidak ditemukan pada CAS PENS")
                 return False
 
-            cur = r2.headers.get("Location", "")
+            lt = lt_match.group(1)
+            action = action_match.group(1)
+            if action.startswith("/"):
+                parsed = urlparse(cas_login_url)
+                action = f"{parsed.scheme}://{parsed.netloc}{action}"
+
+            # 3. Kirim kredensial akun mahasiswa ke CAS PENS
+            payload = {
+                "username": self.user,
+                "password": self.password,
+                "lt": lt,
+                "_eventId": "submit",
+                "submit": "LOGIN"
+            }
+            r3 = self.session.post(action, data=payload, allow_redirects=False,
+                                   headers={"Referer": cas_login_url}, timeout=15)
+            callback_url = r3.headers.get("Location", "")
+            if not callback_url or "ticket=ST-" not in callback_url:
+                self.log.error("Autentikasi CAS gagal: Username / Password salah")
+                return False
+
+            # 4. Ikuti callback tiket ST- kembali ke sistem ETHOL
+            cur = callback_url
             if cur.startswith("/"):
                 cur = "https://ethol.pens.ac.id" + cur
 
             for _ in range(6):
-                r3 = self.session.get(cur, allow_redirects=False, timeout=15)
-                if r3.status_code in (301, 302, 303, 307):
-                    next_loc = r3.headers.get("Location", "")
-                    if next_loc.startswith("/"):
-                        next_loc = "https://ethol.pens.ac.id" + next_loc
-                    cur = next_loc
+                rc = self.session.get(cur, allow_redirects=False, timeout=15)
+                if rc.status_code in (301, 302, 303, 307):
+                    nxt = rc.headers.get("Location", "")
+                    if nxt.startswith("/"):
+                        nxt = "https://ethol.pens.ac.id" + nxt
+                    cur = nxt
                     continue
                 break
 
+            # 5. Refresh token & Validasi token ETHOL
             self.session.post("https://ethol.pens.ac.id/api/auth/refresh", json={}, timeout=15)
             rv = self.session.get("https://ethol.pens.ac.id/api/auth/validasi-token", timeout=15)
             if rv.status_code == 200:
                 data = rv.json() or {}
                 self.student_number = str(data.get("nomor", ""))
                 self.student_name   = str(data.get("nama", ""))
-                self.student_email  = str(data.get("email", ""))
+                self.student_email  = str(data.get("email", self.user))
                 self.log.info(f"✅ SSO ETHOL berhasil. Nama: {self.student_name} | NRP: {self.student_number}")
                 return True
+
+            self.log.error(f"Validasi token ETHOL gagal (HTTP {rv.status_code})")
             return False
         except Exception as e:
-            self.log.error(f"Exception SSO: {e}")
+            self.log.error(f"Exception SSO ETHOL: {e}")
             return False
 
     def verify(self) -> dict:
-        """Verifikasi apakah kredensial akun valid di MIS CAS dan ETHOL PENS."""
+        """Verifikasi apakah kredensial akun valid di CAS dan ETHOL PENS."""
         self.log.info(f"Verifikasi akun ETHOL untuk {self.user}...")
-        if not self._mis_login():
-            return {"success": False, "error": "Gagal login ke MIS CAS (Username/Password salah atau CAS PENS down)"}
-        if not self._ethol_sso():
-            return {"success": False, "error": "Gagal SSO ke ETHOL (Token SSO tidak valid)"}
+        if not self._login_ethol_sso():
+            return {"success": False, "error": "Gagal login ke CAS PENS / ETHOL (Username atau Password salah)"}
         return {
             "success": True,
             "nomor": self.student_number,
@@ -362,30 +330,16 @@ class AccountWorker:
         self.student_number = ""
         when = timestamp_str()
 
-        # 1. Pengecekan Login MIS
-        if not self._mis_login():
-            self.log.error("Login MIS gagal, mengirim notifikasi peringatan ke mahasiswa...")
-            log_to_firebase("MIS Login", "LOGIN_FAILED", f"Gagal login MIS CAS untuk akun {self.label}")
+        # 1. Pengecekan Login & SSO ETHOL
+        if not self._login_ethol_sso():
+            self.log.error("Login / SSO ETHOL gagal, mengirim notifikasi peringatan ke mahasiswa...")
+            log_to_firebase("ETHOL Login", "LOGIN_FAILED", f"Gagal login / SSO ETHOL untuk akun {self.label}")
             msg = (
-                f"⚠️ *PERINGATAN: Gagal Login MIS CAS*\n\n"
+                f"⚠️ *PERINGATAN: Gagal Login ETHOL*\n\n"
                 f"👤 *Akun:* {self.label} ({self.user})\n"
-                f"❌ *Kendala:* Autentikasi MIS CAS PENS ditolak (Password salah / Server Down).\n"
+                f"❌ *Kendala:* Autentikasi CAS PENS ditolak (Password salah / Server Sibuk).\n"
                 f"⏰ *Waktu:* {when}\n\n"
-                f"_Bot tidak dapat melakukan presensi otomatis. Segera cek kredensial atau presensi manual!_"
-            )
-            notify_client(self.config, msg)
-            return
-
-        # 2. Pengecekan SSO ETHOL
-        if not self._ethol_sso():
-            self.log.error("SSO ETHOL gagal, mengirim notifikasi peringatan ke mahasiswa...")
-            log_to_firebase("ETHOL SSO", "SSO_FAILED", f"Gagal SSO ETHOL untuk akun {self.label}")
-            msg = (
-                f"⚠️ *PERINGATAN: Gagal SSO ETHOL*\n\n"
-                f"👤 *Akun:* {self.label}\n"
-                f"❌ *Kendala:* Sesi token SSO ETHOL tidak valid / server sibuk.\n"
-                f"⏰ *Waktu:* {when}\n\n"
-                f"_Segera buka https://ethol.pens.ac.id untuk melakukan presensi manual!_"
+                f"_Bot tidak dapat melakukan presensi otomatis. Segera periksa kredensial atau presensi manual!_"
             )
             notify_client(self.config, msg)
             return
