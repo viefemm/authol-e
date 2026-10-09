@@ -359,109 +359,124 @@ class AccountWorker:
                 self.log.info("Tidak ada notifikasi presensi")
                 return
 
-            notif = data_list[0]
-            ket   = notif.get("keterangan", "")
+            open_sessions_found = 0
 
-            if "Dosen telah membuka presensi" not in ket:
-                self.log.info("Tidak ada presensi yang dibuka")
-                return
+            # Periksa hingga 5 notifikasi presensi terbaru
+            for notif in data_list[:5]:
+                ket = notif.get("keterangan", "")
+                if "Dosen telah membuka presensi" not in ket:
+                    continue
 
-            data_terkait = notif.get("dataTerkait", "")
-            if "-" not in data_terkait:
-                return
+                data_terkait = notif.get("dataTerkait", "")
+                if "-" not in data_terkait:
+                    continue
 
-            parts  = data_terkait.rsplit("-", 1)
-            kuliah, js = parts[0].strip(), parts[1].strip()
-            idx    = ket.find("untuk matakuliah ")
-            matkul = ket[idx + 17:].strip() if idx >= 0 else ket.strip()
-            self.log.info(f"📢 Presensi terbuka: {matkul} (Kuliah ID: {kuliah})")
+                parts = data_terkait.rsplit("-", 1)
+                kuliah, js = parts[0].strip(), parts[1].strip()
+                idx = ket.find("untuk matakuliah ")
+                matkul = ket[idx + 17:].strip() if idx >= 0 else ket.strip()
 
-            ra = self.session.get(
-                f"https://ethol.pens.ac.id/api/presensi/aktif-kuliah?kuliah={kuliah}&jenis_schema={js}",
-                timeout=15
-            )
-            if ra.status_code != 200:
-                self.log.error(f"Gagal akses aktif-kuliah (HTTP {ra.status_code})")
-                log_to_firebase(matkul, "API_ERROR", f"Gagal get aktif-kuliah HTTP {ra.status_code} untuk {self.label}")
-                msg = (
-                    f"⚠️ *Gagal Cek Sesi Presensi*\n\n"
-                    f"👤 *Akun:* {self.label}\n"
-                    f"📚 *Mata Kuliah:* {matkul}\n"
-                    f"❌ *Kendala:* Server ETHOL merespons HTTP {ra.status_code}\n"
-                    f"⏰ *Waktu:* {when}\n\n"
-                    f"_Segera presensi manual di ETHOL!_"
+                ra = self.session.get(
+                    f"https://ethol.pens.ac.id/api/presensi/aktif-kuliah?kuliah={kuliah}&jenis_schema={js}",
+                    timeout=15
                 )
-                notify_client(self.config, msg)
-                return
+                if ra.status_code != 200:
+                    self.log.error(f"Gagal akses aktif-kuliah {matkul} (HTTP {ra.status_code})")
+                    continue
 
-            aktif_raw = ra.json()
-            if isinstance(aktif_raw, list):
-                aktif_data = aktif_raw[0] if aktif_raw else {}
-            else:
-                aktif_data = aktif_raw
+                aktif_raw = ra.json()
+                aktif_data = aktif_raw[0] if isinstance(aktif_raw, list) and aktif_raw else (aktif_raw if isinstance(aktif_raw, dict) else {})
 
-            if aktif_data.get("open") != 1:
-                self.log.info("Presensi belum aktif (LOCKED)")
-                return
+                if aktif_data.get("open") != 1:
+                    self.log.info(f"Presensi {matkul} (ID {kuliah}) tidak aktif / sudah ditutup (LOCKED)")
+                    continue
 
-            # 4. Pengecekan Khusus Matakuliah 2 Mingguan (Sistem Kloter / Shift)
-            manual_ids = get_manual_kuliah_ids()
-            if str(kuliah) in manual_ids:
-                self.log.info(f"Matakuliah {matkul} (ID {kuliah}) adalah jadwal 2 mingguan (Kloter). Mengirim peringatan manual...")
-                log_to_firebase(matkul, "KLOTER_ALERT", f"Peringatan presensi kloter 2 mingguan dikirim ke {self.label} (Kuliah ID: {kuliah})")
-                msg = (
-                    f"📢 *PERINGATAN: Presensi Dibuka (Sistem Kloter 2 Minggu Sekali)*\n\n"
-                    f"👤 *Akun:* {self.label}\n"
-                    f"📚 *Mata Kuliah:* {matkul} (ID: {kuliah})\n"
-                    f"⏰ *Waktu:* {when}\n\n"
-                    f"⚠️ *Perhatian Khusus:*\n"
-                    f"Mata kuliah ini berlangsung secara *2 minggu sekali (Sistem Kloter/Shift)*.\n"
-                    f"Bot sengaja *tidak melakukan presensi otomatis* agar tidak salah absen di luar jadwal kloter Anda.\n\n"
-                    f"👉 *Jika hari ini adalah jadwal kloter Anda, silakan segera lakukan presensi manual di ETHOL:*\n"
-                    f"https://ethol.pens.ac.id"
-                )
-                notify_client(self.config, msg)
-                return
+                open_sessions_found += 1
+                self.log.info(f"📢 Presensi AKTIF & TERBUKA: {matkul} (Kuliah ID: {kuliah})")
 
-            # 5. Pengecekan Kunci Presensi
-            key = aktif_data.get("key", "")
-            if not key or not self.student_number:
-                self.log.warning("Key presensi kosong atau student_number tidak ada")
-                log_to_firebase(matkul, "KEY_EMPTY", f"Key presensi kosong untuk {self.label}")
-                msg = (
-                    f"⚠️ *Presensi Terbuka tapi Kunci Belum Ada*\n\n"
-                    f"👤 *Akun:* {self.label}\n"
-                    f"📚 *Mata Kuliah:* {matkul}\n"
-                    f"⏰ *Waktu:* {when}\n\n"
-                    f"_Kunci presensi belum tersedia di server. Harap presensi manual di web ETHOL._"
-                )
-                notify_client(self.config, msg)
-                return
+                # 4. Pengecekan Khusus Matakuliah 2 Mingguan (Sistem Kloter / Shift)
+                manual_ids = get_manual_kuliah_ids()
+                if str(kuliah) in manual_ids:
+                    self.log.info(f"Matakuliah {matkul} (ID {kuliah}) adalah jadwal 2 mingguan (Kloter). Mengirim peringatan manual...")
+                    log_to_firebase(matkul, "KLOTER_ALERT", f"Peringatan presensi kloter 2 mingguan dikirim ke {self.label} (Kuliah ID: {kuliah})")
+                    msg = (
+                        f"📢 *PERINGATAN: Presensi Dibuka (Sistem Kloter 2 Minggu Sekali)*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul} (ID: {kuliah})\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"⚠️ *Perhatian Khusus:*\n"
+                        f"Mata kuliah ini berlangsung secara *2 minggu sekali (Sistem Kloter/Shift)*.\n"
+                        f"Bot sengaja *tidak melakukan presensi otomatis* agar tidak salah absen di luar jadwal kloter Anda.\n\n"
+                        f"👉 *Jika hari ini adalah jadwal kloter Anda, silakan segera lakukan presensi manual di ETHOL:*\n"
+                        f"https://ethol.pens.ac.id"
+                    )
+                    notify_client(self.config, msg)
+                    continue
 
-            # 6. Submit Presensi ke ETHOL
-            payload = {
-                "kuliah": int(kuliah), "jenis_schema": int(js),
-                "mahasiswa": int(self.student_number),
-                "key": key, "kuliah_asal": int(kuliah)
-            }
-            rs      = self.session.post("https://ethol.pens.ac.id/api/presensi/mahasiswa",
-                                        json=payload, timeout=15)
-            rs_data = rs.json() if "application/json" in rs.headers.get("content-type","") else {}
-            sukses  = rs.status_code == 200 and rs_data.get("sukses") is True
-            pesan   = rs_data.get("pesan", "")
+                # 5. Pengecekan Kunci Presensi
+                key = aktif_data.get("key", "")
+                if not key or not self.student_number:
+                    self.log.warning(f"Key presensi kosong atau student_number tidak ada ({matkul})")
+                    log_to_firebase(matkul, "KEY_EMPTY", f"Key presensi kosong untuk {self.label}")
+                    msg = (
+                        f"⚠️ *Presensi Terbuka tapi Kunci Belum Ada*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul}\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"_Kunci presensi belum tersedia di server. Harap presensi manual di web ETHOL._"
+                    )
+                    notify_client(self.config, msg)
+                    continue
 
-            self.log.info(f"Submit HTTP {rs.status_code} sukses={sukses} pesan={pesan}")
+                # 6. Submit Presensi ke ETHOL
+                payload = {
+                    "kuliah": int(kuliah), "jenis_schema": int(js),
+                    "mahasiswa": int(self.student_number),
+                    "key": key, "kuliah_asal": int(kuliah)
+                }
+                rs = self.session.post("https://ethol.pens.ac.id/api/presensi/mahasiswa",
+                                       json=payload, timeout=15)
+                rs_data = rs.json() if "application/json" in rs.headers.get("content-type","") else {}
+                sukses = rs.status_code == 200 and rs_data.get("sukses") is True
+                pesan = rs_data.get("pesan", "")
 
-            if sukses:
-                log_to_firebase(matkul, "SUCCESS", f"Presensi berhasil untuk {self.label}")
-                msg = (
-                    f"✅ *Presensi Berhasil!*\n\n"
-                    f"👤 *Akun:* {self.label}\n"
-                    f"📚 *Mata Kuliah:* {matkul}\n"
-                    f"⏰ *Waktu:* {when}\n\n"
-                    f"_Presensi otomatis via ETHOL Bot._"
-                )
-                notify_client(self.config, msg)
+                self.log.info(f"Submit {matkul} HTTP {rs.status_code} sukses={sukses} pesan={pesan}")
+
+                if sukses:
+                    log_to_firebase(matkul, "SUCCESS", f"Presensi berhasil untuk {self.label}")
+                    msg = (
+                        f"✅ *Presensi Berhasil!*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul}\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"_Presensi otomatis via ETHOL Bot._"
+                    )
+                    notify_client(self.config, msg)
+                elif is_already_present_msg(pesan):
+                    # Client sudah melakukan presensi manual sebelumnya
+                    log_to_firebase(matkul, "ALREADY_PRESENT", f"Akun {self.label} sudah presensi manual ({pesan})")
+                    msg = (
+                        f"ℹ️ *Status: Sudah Melakukan Presensi Manual*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul}\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"_{pesan or 'Anda telah tercatat melakukan presensi secara manual sebelumnya.'}_\n"
+                        f"_Tidak perlu melakukan presensi ulang._"
+                    )
+                    notify_client(self.config, msg)
+                else:
+                    log_to_firebase(matkul, "FAILED", f"Gagal presensi {self.label} ({matkul}): {pesan}")
+                    msg = (
+                        f"⚠️ *Gagal Presensi Otomatis*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul}\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"_{pesan or 'server menolak submit presensi'} — segera lakukan presensi manual!_"
+                    )
+                    notify_client(self.config, msg)
+
+            if open_sessions_found == 0:
+                self.log.info("Tidak ada sesi presensi yang sedang berstatus OPEN")
             elif is_already_present_msg(pesan):
                 # Client sudah melakukan presensi manual sebelumnya
                 log_to_firebase(matkul, "ALREADY_PRESENT", f"Akun {self.label} sudah presensi manual ({pesan})")
