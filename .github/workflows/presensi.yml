@@ -1,6 +1,10 @@
 name: ETHOL Presensi Bot
 
 on:
+  schedule:
+    # Fail-Safe Cloud Polling: Jalankan otomatis setiap 10 menit selama jam perkuliahan (Senin-Jumat, 06:30 - 21:00 WIB / 23:30 - 14:00 UTC)
+    - cron: '*/10 0-14 * * 1-5'
+    - cron: '30,40,50 23 * * 0-4'
   workflow_dispatch:  # Trigger manual via Web Dashboard / GitHub UI
     inputs:
       action:
@@ -35,14 +39,16 @@ jobs:
         env:
           FONNTE_TOKEN: ${{ secrets.FONNTE_TOKEN }}
           ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
-          FIREBASE_URL: "https://ethol-bot-default-rtdb.firebaseio.com"
+          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
+          ADMIN_WA: ${{ secrets.ADMIN_WA }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           JAM_MULAI: "6"
           JAM_SELESAI: "21"
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_EVENT_ACTION: ${{ github.event.action }}
           CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: |
-          python app_actions.py 2>&1 | tee bot_log.txt
+          python cloud-worker/app_actions.py 2>&1 | tee bot_log.txt
 
       - name: Upload Log File (.txt)
         if: always()
