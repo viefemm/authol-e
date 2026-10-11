@@ -48,7 +48,8 @@ jobs:
           GITHUB_EVENT_ACTION: ${{ github.event.action }}
           CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: |
-          python cloud-worker/app_actions.py 2>&1 | tee bot_log.txt
+          set -o pipefail
+          python app_actions.py 2>&1 | tee bot_log.txt
 
       - name: Upload Log File (.txt)
         if: always()
