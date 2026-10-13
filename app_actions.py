@@ -17,7 +17,7 @@ import json
 import logging
 import threading
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import pytz
 import re
 from urllib.parse import urlparse
@@ -39,6 +39,43 @@ JAM_SELESAI        = int(os.environ.get("JAM_SELESAI", "21"))
 
 # Daftar bawaan ID matakuliah 2 minggu sekali (Sistem Kloter / Shift)
 DEFAULT_MANUAL_KULIAH_IDS = ["221835", "221847", "221839", "221840"]
+
+# Batas umur notifikasi presensi: lebih tua dari ini dianggap sesi basi dan diabaikan.
+NOTIF_MAX_AGE_SECONDS = 3600  # 1 jam
+
+def parse_notif_time(notif: dict):
+    """Ambil waktu notifikasi sebagai datetime UTC; None jika tidak bisa diparsing.
+
+    Mendukung format ISO server ETHOL ("2026-10-09T01:02:16.000Z") dan
+    fallback format Indonesia ("Jumat, 09 Oktober 2026 - 08:02" WIB).
+    """
+    raw = notif.get("createdAt", "")
+    if raw:
+        try:
+            s = str(raw).strip()
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            pass
+    indo = notif.get("createdAtIndonesia", "")
+    if indo:
+        try:
+            months = {"januari": 1, "februari": 2, "maret": 3, "april": 4,
+                      "mei": 5, "juni": 6, "juli": 7, "agustus": 8,
+                      "september": 9, "oktober": 10, "november": 11, "desember": 12}
+            date_part, _, time_part = str(indo).partition(" - ")
+            _, _, rest = date_part.partition(", ")
+            d, mon, y = rest.strip().split()
+            hh, mm = time_part.strip().split(":")
+            dt = datetime(int(y), months[mon.lower()], int(d), int(hh), int(mm))
+            return (dt - timedelta(hours=7)).replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return None
 
 
 def now_wib() -> datetime:
@@ -389,8 +426,9 @@ class AccountWorker:
 
             open_sessions_found = 0
 
-            # Periksa hingga 5 notifikasi presensi terbaru
-            for notif in data_list[:5]:
+            # Periksa hingga 10 notifikasi presensi terbaru (slot lebih longgar
+            # karena notifikasi basi dilewati tanpa memakan jatah)
+            for notif in data_list[:10]:
                 ket = notif.get("keterangan", "")
                 if "Dosen telah membuka presensi" not in ket:
                     continue
@@ -403,6 +441,17 @@ class AccountWorker:
                 kuliah, js = parts[0].strip(), parts[1].strip()
                 idx = ket.find("untuk matakuliah ")
                 matkul = ket[idx + 17:].strip() if idx >= 0 else ket.strip()
+
+                # Filter kesegaran: notifikasi lebih tua dari 1 jam dianggap sesi basi.
+                # Mencegah submit ulang sesi lama (mis. sesi minggu lalu yang belum
+                # ditutup dosen) pada run berikutnya.
+                notif_dt = parse_notif_time(notif)
+                if notif_dt is None:
+                    self.log.warning(f"Tidak bisa parsing waktu notifikasi {matkul} (ID {kuliah}), tetap diproses")
+                elif (datetime.now(timezone.utc) - notif_dt).total_seconds() > NOTIF_MAX_AGE_SECONDS:
+                    age_min = (datetime.now(timezone.utc) - notif_dt).total_seconds() / 60
+                    self.log.info(f"Notifikasi {matkul} (ID {kuliah}) basi ({age_min:.0f} menit lalu), lewati")
+                    continue
 
                 ra = self.session.get(
                     f"https://ethol.pens.ac.id/api/presensi/aktif-kuliah?kuliah={kuliah}&jenis_schema={js}",
