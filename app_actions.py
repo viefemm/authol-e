@@ -108,11 +108,39 @@ def get_manual_kuliah_ids() -> list:
     return DEFAULT_MANUAL_KULIAH_IDS
 
 def is_already_present_msg(msg_str: str) -> bool:
-    """Mendeteksi apakah respons server menandakan mahasiswa sudah presensi manual."""
+    """Mendeteksi apakah respons server menandakan mahasiswa sudah presensi.
+
+    Mencakup varian kalimat server ETHOL seperti:
+    - "Anda sudah melakukan di sesi kuliah ini"
+    - "sudah presensi / sudah absen / sudah tercatat"
+    """
     if not msg_str:
         return False
     lower = msg_str.lower()
-    return ("sudah" in lower and any(w in lower for w in ["presensi", "absen", "isi", "mengisi", "ada", "tercatat", "terdaftar"])) or ("already" in lower)
+    return ("sudah" in lower and any(w in lower for w in [
+        "presensi", "absen", "isi", "mengisi", "ada", "tercatat",
+        "terdaftar", "melakukan", "sesi", "hadir", "terisi"
+    ])) or ("already" in lower)
+
+def presensi_done_key(kuliah: str, student_id: str) -> str:
+    """Path Firebase untuk penanda idempoten presensi harian."""
+    safe_student = "".join(c for c in str(student_id) if c.isalnum() or c in ("@", ".", "-", "_"))
+    return f"{FIREBASE_URL}/presensi_done/{date_stamp()}/{kuliah}/{safe_student}.json"
+
+def is_presensi_done(kuliah: str, student_id: str) -> bool:
+    """Cek apakah presensi (kuliah, mahasiswa) sudah tercatat sukses hari ini."""
+    try:
+        r = requests.get(presensi_done_key(kuliah, student_id), timeout=5)
+        return r.status_code == 200 and r.json() is True
+    except Exception:
+        return False
+
+def mark_presensi_done(kuliah: str, student_id: str):
+    """Tandai presensi (kuliah, mahasiswa) sudah tercatat hari ini agar tidak disubmit ulang."""
+    try:
+        requests.put(presensi_done_key(kuliah, student_id), json=True, timeout=5)
+    except Exception as e:
+        logging.getLogger("FIREBASE").error(f"Gagal tandai presensi_done: {e}")
 
 def send_wa(target: str, message: str) -> bool:
     token = get_fonnte_token()
@@ -428,7 +456,14 @@ class AccountWorker:
                     notify_client(self.config, msg)
                     continue
 
-                # 6. Submit Presensi ke ETHOL
+                # 6. Cek idempoten: lewati jika presensi ini sudah tercatat sukses hari ini
+                # (mencegah submit duplikat saat cron dan dispatch ESP32 berjalan bersamaan)
+                student_id = self.student_number or self.user
+                if is_presensi_done(kuliah, student_id):
+                    self.log.info(f"Presensi {matkul} (ID {kuliah}) sudah tercatat hari ini untuk {self.label}, lewati submit duplikat")
+                    continue
+
+                # 7. Submit Presensi ke ETHOL
                 payload = {
                     "kuliah": int(kuliah), "jenis_schema": int(js),
                     "mahasiswa": int(self.student_number),
@@ -443,6 +478,7 @@ class AccountWorker:
                 self.log.info(f"Submit {matkul} HTTP {rs.status_code} sukses={sukses} pesan={pesan}")
 
                 if sukses:
+                    mark_presensi_done(kuliah, student_id)
                     log_to_firebase(matkul, "SUCCESS", f"Presensi berhasil untuk {self.label}")
                     msg = (
                         f"✅ *Presensi Berhasil!*\n\n"
@@ -453,8 +489,10 @@ class AccountWorker:
                     )
                     notify_client(self.config, msg)
                 elif is_already_present_msg(pesan):
-                    # Client sudah melakukan presensi manual sebelumnya
-                    log_to_firebase(matkul, "ALREADY_PRESENT", f"Akun {self.label} sudah presensi manual ({pesan})")
+                    # Client sudah tercatat presensi (manual atau worker lain yang lebih dulu).
+                    # Tandai selesai agar worker berikutnya tidak submit ulang / kirim WA alarm.
+                    mark_presensi_done(kuliah, student_id)
+                    log_to_firebase(matkul, "ALREADY_PRESENT", f"Akun {self.label} sudah presensi ({pesan})")
                     msg = (
                         f"ℹ️ *Status: Sudah Melakukan Presensi Manual*\n\n"
                         f"👤 *Akun:* {self.label}\n"
