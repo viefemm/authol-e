@@ -1,10 +1,6 @@
 name: ETHOL Presensi Bot
 
 on:
-  schedule:
-    # Fail-Safe Cloud Polling: Jalankan otomatis setiap 10 menit selama jam perkuliahan (Senin-Jumat, 06:30 - 21:00 WIB / 23:30 - 14:00 UTC)
-    - cron: '*/10 0-14 * * 1-5'
-    - cron: '30,40,50 23 * * 0-4'
   workflow_dispatch:  # Trigger manual via Web Dashboard / GitHub UI
     inputs:
       action:
