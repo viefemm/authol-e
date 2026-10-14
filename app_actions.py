@@ -564,28 +564,6 @@ class AccountWorker:
 
             if open_sessions_found == 0:
                 self.log.info("Tidak ada sesi presensi yang sedang berstatus OPEN")
-            elif is_already_present_msg(pesan):
-                # Client sudah melakukan presensi manual sebelumnya
-                log_to_firebase(matkul, "ALREADY_PRESENT", f"Akun {self.label} sudah presensi manual ({pesan})")
-                msg = (
-                    f"ℹ️ *Status: Sudah Melakukan Presensi Manual*\n\n"
-                    f"👤 *Akun:* {self.label}\n"
-                    f"📚 *Mata Kuliah:* {matkul}\n"
-                    f"⏰ *Waktu:* {when}\n\n"
-                    f"_{pesan or 'Anda telah tercatat melakukan presensi secara manual sebelumnya.'}_\n"
-                    f"_Tidak perlu melakukan presensi ulang._"
-                )
-                notify_client(self.config, msg)
-            else:
-                log_to_firebase(matkul, "FAILED", f"Gagal presensi {self.label}: {pesan}")
-                msg = (
-                    f"⚠️ *Gagal Presensi Otomatis*\n\n"
-                    f"👤 *Akun:* {self.label}\n"
-                    f"📚 *Mata Kuliah:* {matkul}\n"
-                    f"⏰ *Waktu:* {when}\n\n"
-                    f"_{pesan or 'server menolak submit presensi'} — segera lakukan presensi manual!_"
-                )
-                notify_client(self.config, msg)
         except Exception as e:
             self.log.error(f"Exception run_once: {e}")
             log_to_firebase("System Worker", "EXCEPTION", f"Worker error pada {self.label}: {str(e)[:100]}")
