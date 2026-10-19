@@ -69,7 +69,7 @@
             ETHOL Bot Dashboard
             <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Hybrid Realtime</span>
           </h1>
-          <p class="text-xs text-slate-400">ESP32 Scout Worker ➔ Firebase Sync ➔ Cloud Exec</p>
+          <p class="text-xs text-slate-400">Dashboard ➔ GitHub Actions ➔ Firebase Sync (ESP32 opsional)</p>
         </div>
       </div>
       
@@ -963,17 +963,59 @@
         },
 
         async triggerCloudPresensi() {
-          if (!confirm("Kirim instruksi trigger ke ESP32 & Cloud sekarang?")) return;
+          if (!confirm("Trigger presensi sekarang langsung ke GitHub Actions Cloud Worker?\n\n(ESP32 tidak diperlukan untuk trigger ini)")) return;
           this.actionLoading = true;
           try {
-            await fetch(`${FIREBASE_URL}/device_status/manual_trigger.json`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(true)
+            const ghToken = this.config.github_token || "";
+            const ghRepo = "viefemm/authol-e";
+
+            // Fallback: jika token belum diatur, tetap bisa lewat ESP32
+            if (!ghToken) {
+              await fetch(`${FIREBASE_URL}/device_status/manual_trigger.json`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(true)
+              });
+              alert("⚠️ GitHub token belum diatur di menu Pengaturan.\nTrigger dialihkan ke ESP32 (fallback).");
+              return;
+            }
+
+            // Langsung panggil Repository Dispatch API (tanpa perantara ESP32)
+            const res = await fetch(`https://api.github.com/repos/${ghRepo}/dispatches`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${ghToken}`,
+                "Accept": "application/vnd.github.v3+json",
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                event_type: "ethol_presensi_trigger",
+                client_payload: {
+                  matkul: "Manual Trigger - Dashboard",
+                  kuliah_id: "0"
+                }
+              })
             });
-            alert("✅ Perintah trigger terkirim realtime ke Firebase!");
+
+            if (res.status !== 204) {
+              const errText = await res.text();
+              throw new Error(`GitHub API HTTP ${res.status}: ${errText.slice(0, 200)}`);
+            }
+
+            await fetch(`${FIREBASE_URL}/history.json`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                timestamp: new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
+                matkul: "Manual Trigger",
+                status: "TRIGGERED",
+                message: "Dipicu manual dari Web Dashboard, langsung ke GitHub Actions"
+              })
+            });
+
+            alert("✅ Trigger terkirim langsung ke GitHub Actions.\nCloud worker akan berjalan dalam beberapa detik. Cek riwayat untuk hasilnya.");
           } catch (e) {
-            alert("Error: " + e.message);
+            alert("❌ Gagal trigger ke GitHub Actions: " + e.message + "\n\nCoba lagi, atau gunakan fallback ESP32 dengan mengosongkan GitHub token di Pengaturan.");
           } finally {
             this.actionLoading = false;
           }
