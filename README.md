@@ -82,6 +82,7 @@ The system operates with near-zero latency (< 15 seconds detection window), auto
 - Modern, PIN-protected web console built with **Tailwind CSS + Alpine.js**.
 - Live hardware telemetry monitor with sub-70s epoch health indicators.
 - **"Verify ETHOL"** tool for real-time profiling (fetching student official names & NRP numbers directly from CAS SSO).
+- **Direct Cloud Trigger:** the Presensi button dispatches GitHub Actions straight from the browser (no ESP32 hop required), with automatic ESP32 fallback if no GitHub token is configured.
 - Interactive multi-channel testing buttons for WhatsApp and Telegram gateways.
 
 ---
