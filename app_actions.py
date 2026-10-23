@@ -41,7 +41,7 @@ JAM_SELESAI        = int(os.environ.get("JAM_SELESAI", "21"))
 DEFAULT_MANUAL_KULIAH_IDS = ["221835", "221847", "221839", "221840"]
 
 # Batas umur notifikasi presensi: lebih tua dari ini dianggap sesi basi dan diabaikan.
-NOTIF_MAX_AGE_SECONDS = 3600  # 1 jam
+NOTIF_MAX_AGE_SECONDS = 14400  # 4 jam (cukup untuk sesi praktikum lab 3-4 jam pada hari yang sama, aman membuang sesi basi minggu lalu)
 
 def parse_notif_time(notif: dict):
     """Ambil waktu notifikasi sebagai datetime UTC; None jika tidak bisa diparsing.
