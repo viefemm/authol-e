@@ -1,0 +1,700 @@
+"""
+ETHOL Presensi Bot - Cloud Parallel Worker & Account Verifier
+Mengambil daftar akun aktif langsung dari Firebase Realtime Database,
+menjalankan presensi secara paralel, memverifikasi akun ETHOL / MIS CAS,
+mencatat log ke Firebase, mengirimkan notifikasi multi-channel (WhatsApp via Fonnte & Telegram),
+dan memantau kesehatan ESP32 (Cloud Watchdog).
+
+Fitur:
+- Zero Fail-Silent di setiap titik kegagalan (Login MIS, SSO ETHOL, Sesi Presensi)
+- Deteksi presensi manual (jika mahasiswa sudah melakukan presensi manual sebelumnya)
+- Filter khusus matakuliah sistem kloter 2 mingguan (mengirim peringatan jadwal kloter)
+"""
+
+import os
+import time
+import json
+import logging
+import threading
+import requests
+from datetime import datetime, timedelta, timezone
+import pytz
+import re
+from urllib.parse import urlparse
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+
+WIB = pytz.timezone("Asia/Jakarta")
+
+FIREBASE_URL       = os.environ.get("FIREBASE_URL", "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com")
+FONNTE_TOKEN       = os.environ.get("FONNTE_TOKEN", "")
+ADMIN_WA           = os.environ.get("ADMIN_WA", "")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+JAM_MULAI          = int(os.environ.get("JAM_MULAI", "6"))
+JAM_SELESAI        = int(os.environ.get("JAM_SELESAI", "21"))
+
+# Daftar bawaan ID matakuliah 2 minggu sekali (Sistem Kloter / Shift)
+DEFAULT_MANUAL_KULIAH_IDS = ["221835", "221847", "221839", "221840"]
+
+# Batas umur notifikasi presensi: lebih tua dari ini dianggap sesi basi dan diabaikan.
+NOTIF_MAX_AGE_SECONDS = 14400  # 4 jam (cukup untuk sesi praktikum lab 3-4 jam pada hari yang sama, aman membuang sesi basi minggu lalu)
+
+def parse_notif_time(notif: dict):
+    """Ambil waktu notifikasi sebagai datetime UTC; None jika tidak bisa diparsing.
+
+    Mendukung format ISO server ETHOL ("2026-10-09T01:02:16.000Z") dan
+    fallback format Indonesia ("Jumat, 09 Oktober 2026 - 08:02" WIB).
+    """
+    raw = notif.get("createdAt", "")
+    if raw:
+        try:
+            s = str(raw).strip()
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            pass
+    indo = notif.get("createdAtIndonesia", "")
+    if indo:
+        try:
+            months = {"januari": 1, "februari": 2, "maret": 3, "april": 4,
+                      "mei": 5, "juni": 6, "juli": 7, "agustus": 8,
+                      "september": 9, "oktober": 10, "november": 11, "desember": 12}
+            date_part, _, time_part = str(indo).partition(" - ")
+            _, _, rest = date_part.partition(", ")
+            d, mon, y = rest.strip().split()
+            hh, mm = time_part.strip().split(":")
+            dt = datetime(int(y), months[mon.lower()], int(d), int(hh), int(mm))
+            return (dt - timedelta(hours=7)).replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return None
+
+
+def now_wib() -> datetime:
+    return datetime.now(WIB)
+
+def in_window() -> bool:
+    n = now_wib()
+    return n.weekday() < 5 and JAM_MULAI <= n.hour < JAM_SELESAI
+
+def timestamp_str() -> str:
+    return now_wib().strftime("%d-%m-%Y pukul %H:%M WIB")
+
+def date_stamp() -> str:
+    return now_wib().strftime("%Y%m%d")
+
+def log_to_firebase(matkul: str, status: str, message: str):
+    """Mencatat aktivitas presensi ke Firebase Realtime Database."""
+    try:
+        payload = {
+            "timestamp": now_wib().strftime("%Y-%m-%d %H:%M:%S"),
+            "matkul": matkul,
+            "status": status,
+            "message": message
+        }
+        requests.post(f"{FIREBASE_URL}/history.json", json=payload, timeout=10)
+    except Exception as e:
+        logging.getLogger("FIREBASE").error(f"Gagal simpan log ke Firebase: {e}")
+
+def get_tg_token() -> str:
+    global TELEGRAM_BOT_TOKEN
+    if TELEGRAM_BOT_TOKEN:
+        return TELEGRAM_BOT_TOKEN
+    try:
+        r = requests.get(f"{FIREBASE_URL}/config/telegram_bot_token.json", timeout=5)
+        if r.status_code == 200 and r.json():
+            TELEGRAM_BOT_TOKEN = str(r.json())
+            return TELEGRAM_BOT_TOKEN
+    except Exception:
+        pass
+    return ""
+
+def get_fonnte_token() -> str:
+    global FONNTE_TOKEN
+    if FONNTE_TOKEN:
+        return FONNTE_TOKEN
+    try:
+        r = requests.get(f"{FIREBASE_URL}/config/fonnte_token.json", timeout=5)
+        if r.status_code == 200 and r.json():
+            FONNTE_TOKEN = str(r.json())
+            return FONNTE_TOKEN
+    except Exception:
+        pass
+    return FONNTE_TOKEN
+
+def get_manual_kuliah_ids() -> list:
+    """Mengambil daftar ID matakuliah sistem kloter 2 mingguan dari Firebase."""
+    try:
+        r = requests.get(f"{FIREBASE_URL}/config/manual_kuliah_ids.json", timeout=5)
+        if r.status_code == 200 and r.json():
+            data = r.json()
+            if isinstance(data, list):
+                return [str(x).strip() for x in data if str(x).strip()]
+            elif isinstance(data, str):
+                return [x.strip() for x in data.split(",") if x.strip()]
+    except Exception:
+        pass
+    return DEFAULT_MANUAL_KULIAH_IDS
+
+def is_already_present_msg(msg_str: str) -> bool:
+    """Mendeteksi apakah respons server menandakan mahasiswa sudah presensi.
+
+    Mencakup varian kalimat server ETHOL seperti:
+    - "Anda sudah melakukan di sesi kuliah ini"
+    - "sudah presensi / sudah absen / sudah tercatat"
+    """
+    if not msg_str:
+        return False
+    lower = msg_str.lower()
+    return ("sudah" in lower and any(w in lower for w in [
+        "presensi", "absen", "isi", "mengisi", "ada", "tercatat",
+        "terdaftar", "melakukan", "sesi", "hadir", "terisi"
+    ])) or ("already" in lower)
+
+def presensi_done_key(kuliah: str, student_id: str) -> str:
+    """Path Firebase untuk penanda idempoten presensi harian."""
+    safe_student = "".join(c for c in str(student_id) if c.isalnum() or c in ("@", ".", "-", "_"))
+    return f"{FIREBASE_URL}/presensi_done/{date_stamp()}/{kuliah}/{safe_student}.json"
+
+def is_presensi_done(kuliah: str, student_id: str) -> bool:
+    """Cek apakah presensi (kuliah, mahasiswa) sudah tercatat sukses hari ini."""
+    try:
+        r = requests.get(presensi_done_key(kuliah, student_id), timeout=5)
+        return r.status_code == 200 and r.json() is True
+    except Exception:
+        return False
+
+def mark_presensi_done(kuliah: str, student_id: str):
+    """Tandai presensi (kuliah, mahasiswa) sudah tercatat hari ini agar tidak disubmit ulang."""
+    try:
+        requests.put(presensi_done_key(kuliah, student_id), json=True, timeout=5)
+    except Exception as e:
+        logging.getLogger("FIREBASE").error(f"Gagal tandai presensi_done: {e}")
+
+def send_wa(target: str, message: str) -> bool:
+    token = get_fonnte_token()
+    if not token or not target:
+        return False
+    try:
+        r = requests.post(
+            "https://api.fonnte.com/send",
+            headers={"Authorization": token},
+            json={"target": target, "message": message},
+            timeout=15
+        )
+        ok = r.status_code == 200 and r.json().get("status") is True
+        logging.getLogger("FONNTE").info(f"{'OK' if ok else 'GAGAL'} WA ke {target}: HTTP {r.status_code}")
+        return ok
+    except Exception as e:
+        logging.getLogger("FONNTE").error(f"Gagal kirim WA ke {target}: {e}")
+        return False
+
+def send_telegram(chat_id: str, message: str) -> bool:
+    token = get_tg_token()
+    if not token or not chat_id:
+        return False
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": message, "parse_mode": "Markdown"},
+            timeout=15
+        )
+        ok = r.status_code == 200 and r.json().get("ok") is True
+        logging.getLogger("TELEGRAM").info(f"{'OK' if ok else 'GAGAL'} Telegram ke {chat_id}: HTTP {r.status_code}")
+        return ok
+    except Exception as e:
+        logging.getLogger("TELEGRAM").error(f"Gagal kirim Telegram ke {chat_id}: {e}")
+        return False
+
+def notify_client(acc: dict, message_wa: str, message_tg: str = ""):
+    """Mengirim notifikasi ke semua kanal client yang aktif (WhatsApp & Telegram)."""
+    wa = acc.get("wa_target", "")
+    tg = acc.get("tg_chat_id", "")
+    msg_tg = message_tg or message_wa
+
+    if wa:
+        send_wa(wa, message_wa)
+    if tg:
+        send_telegram(tg, msg_tg)
+
+
+def check_esp32_offline_watchdog():
+    """Memeriksa apakah ESP32 offline (mati lampu / WiFi putus) dan memberi tahu Admin."""
+    try:
+        r = requests.get(f"{FIREBASE_URL}/device_status.json", timeout=10)
+        if r.status_code != 200:
+            return
+        dev = r.json() or {}
+        last_epoch = dev.get("last_seen_epoch", 0)
+        alert_sent = dev.get("offline_alert_sent", False)
+        now_epoch = int(time.time())
+
+        # Fallback jika epoch belum tersimpan tapi string timestamp ada
+        if not last_epoch and dev.get("last_seen"):
+            try:
+                raw = dev["last_seen"].replace(" WIB", "").strip()
+                dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+                dt = WIB.localize(dt)
+                last_epoch = int(dt.timestamp())
+            except Exception:
+                pass
+
+        # Jika > 120 detik tidak ada heartbeat dan belum ada notif offline dikirim
+        if last_epoch and (now_epoch - last_epoch > 120) and not alert_sent and ADMIN_WA:
+            logging.warning("⚠️ ESP32 terdeteksi OFFLINE! Mengirim notifikasi darurat ke Admin...")
+            msg = (
+                f"🔴 *PERINGATAN: ESP32 OFFLINE (MATI LAMPU / TERPUTUS)*\n\n"
+                f"Hardware ESP32 tidak mengirim heartbeat selama >2 menit.\n"
+                f"Kemungkinan terjadi *mati lampu di kos* atau *WiFi terputus*.\n\n"
+                f"⏰ *Terakhir Aktif:* {dev.get('last_seen', '-')}\n"
+                f"📌 *Status Terakhir:* {dev.get('last_status', '-')}\n"
+                f"📚 *Matkul Terakhir:* {dev.get('last_checked_matkul', '-')}\n\n"
+                f"_Notifikasi otomatis dari Cloud Watchdog._"
+            )
+            send_wa(ADMIN_WA, msg)
+            requests.put(f"{FIREBASE_URL}/device_status/offline_alert_sent.json", json=True, timeout=10)
+            log_to_firebase("ESP32 Watchdog", "OFFLINE_ALERT", "Notifikasi ESP32 mati dikirim ke Admin WhatsApp")
+    except Exception as e:
+        logging.error(f"Error checking ESP32 health watchdog: {e}")
+
+
+def get_active_accounts():
+    """Mengambil daftar akun aktif dari Firebase."""
+    try:
+        r = requests.get(f"{FIREBASE_URL}/accounts.json", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            raw_list = data if isinstance(data, list) else (list(data.values()) if isinstance(data, dict) else [])
+            active_list = [acc for acc in raw_list if acc.get("is_active") is True]
+            if active_list:
+                logging.info(f"Berhasil fetch {len(active_list)} akun aktif dari Firebase.")
+                return active_list
+    except Exception as e:
+        logging.error(f"Gagal fetch akun dari Firebase: {e}")
+
+    fallback_json = os.environ.get("ACCOUNTS_JSON", "[]")
+    try:
+        raw = json.loads(fallback_json)
+        return [a for a in raw if a.get("is_active", True)]
+    except Exception:
+        return []
+
+
+class AccountWorker:
+    def __init__(self, config: dict):
+        self.config         = config
+        self.user           = config["user"]
+        self.password       = config["pass"]
+        self.wa_target      = config.get("wa_target", "")
+        self.tg_chat_id     = config.get("tg_chat_id", "")
+        self.name           = config.get("name", self.user.split("@")[0])
+        self.label          = self.name
+        self.log            = logging.getLogger(self.label)
+        self.session        = requests.Session()
+        self.session.headers.update({"User-Agent": "Mozilla/5.0 (EtholBot/2.0)"})
+        self.student_number = ""
+        self.student_name   = ""
+        self.student_email  = ""
+
+    def _login_ethol_sso(self) -> bool:
+        """Melakukan autentikasi SSO CAS resmi langsung ke server ETHOL PENS."""
+        self.log.info("Autentikasi SSO ETHOL via CAS...")
+        try:
+            # 1. Inisiasi alur SSO CAS langsung dari endpoint resmi ETHOL
+            r1 = self.session.get("https://ethol.pens.ac.id/api/auth/cas-redirect",
+                                  allow_redirects=False, timeout=15)
+            cas_login_url = r1.headers.get("Location", "")
+            if not cas_login_url:
+                self.log.error("Gagal mendapatkan redirect CAS dari ETHOL")
+                return False
+
+            # 2. Ambil halaman login CAS untuk mendapatkan token lt dan URL action
+            r2 = self.session.get(cas_login_url, allow_redirects=False, timeout=15)
+            body = r2.text
+            lt_match = re.search(r'name="lt"\s+value="([^"]+)"', body)
+            action_match = re.search(r'action="([^"]+)"', body)
+            if not lt_match or not action_match:
+                self.log.error("Token lt / action form tidak ditemukan pada CAS PENS")
+                return False
+
+            lt = lt_match.group(1)
+            action = action_match.group(1)
+            if action.startswith("/"):
+                parsed = urlparse(cas_login_url)
+                action = f"{parsed.scheme}://{parsed.netloc}{action}"
+
+            # 3. Kirim kredensial akun mahasiswa ke CAS PENS
+            payload = {
+                "username": self.user,
+                "password": self.password,
+                "lt": lt,
+                "_eventId": "submit",
+                "submit": "LOGIN"
+            }
+            r3 = self.session.post(action, data=payload, allow_redirects=False,
+                                   headers={"Referer": cas_login_url}, timeout=15)
+            callback_url = r3.headers.get("Location", "")
+            if not callback_url or "ticket=ST-" not in callback_url:
+                self.log.error("Autentikasi CAS gagal: Username / Password salah")
+                return False
+
+            # 4. Ikuti callback tiket ST- kembali ke sistem ETHOL
+            cur = callback_url
+            if cur.startswith("/"):
+                cur = "https://ethol.pens.ac.id" + cur
+
+            for _ in range(6):
+                rc = self.session.get(cur, allow_redirects=False, timeout=15)
+                if rc.status_code in (301, 302, 303, 307):
+                    nxt = rc.headers.get("Location", "")
+                    if nxt.startswith("/"):
+                        nxt = "https://ethol.pens.ac.id" + nxt
+                    cur = nxt
+                    continue
+                break
+
+            # 5. Refresh token & Validasi token ETHOL
+            self.session.post("https://ethol.pens.ac.id/api/auth/refresh", json={}, timeout=15)
+            rv = self.session.get("https://ethol.pens.ac.id/api/auth/validasi-token", timeout=15)
+            if rv.status_code == 200:
+                data = rv.json() or {}
+                self.student_number = str(data.get("nomor", ""))
+                self.student_name   = str(data.get("nama", ""))
+                self.student_email  = str(data.get("email", self.user))
+                self.log.info(f"✅ SSO ETHOL berhasil. Nama: {self.student_name} | NRP: {self.student_number}")
+                return True
+
+            self.log.error(f"Validasi token ETHOL gagal (HTTP {rv.status_code})")
+            return False
+        except Exception as e:
+            self.log.error(f"Exception SSO ETHOL: {e}")
+            return False
+
+    def verify(self) -> dict:
+        """Verifikasi apakah kredensial akun valid di CAS dan ETHOL PENS."""
+        self.log.info(f"Verifikasi akun ETHOL untuk {self.user}...")
+        if not self._login_ethol_sso():
+            return {"success": False, "error": "Gagal login ke CAS PENS / ETHOL (Username atau Password salah)"}
+        return {
+            "success": True,
+            "nomor": self.student_number,
+            "nama": self.student_name,
+            "email": self.student_email
+        }
+
+    def run_once(self):
+        """Jalankan satu siklus cek dan submit presensi dengan fail-safe notification."""
+        self.student_number = ""
+        when = timestamp_str()
+
+        # 1. Pengecekan Login & SSO ETHOL
+        if not self._login_ethol_sso():
+            self.log.error("Login / SSO ETHOL gagal, mengirim notifikasi peringatan ke mahasiswa...")
+            log_to_firebase("ETHOL Login", "LOGIN_FAILED", f"Gagal login / SSO ETHOL untuk akun {self.label}")
+            msg = (
+                f"⚠️ *PERINGATAN: Gagal Login ETHOL*\n\n"
+                f"👤 *Akun:* {self.label} ({self.user})\n"
+                f"❌ *Kendala:* Autentikasi CAS PENS ditolak (Password salah / Server Sibuk).\n"
+                f"⏰ *Waktu:* {when}\n\n"
+                f"_Bot tidak dapat melakukan presensi otomatis. Segera periksa kredensial atau presensi manual!_"
+            )
+            notify_client(self.config, msg)
+            return
+
+        # 3. Pengecekan Notifikasi & Eksekusi Presensi
+        try:
+            rn = self.session.get(
+                "https://ethol.pens.ac.id/api/notifikasi/mahasiswa?filterNotif=PRESENSI",
+                timeout=15
+            )
+            if rn.status_code != 200:
+                self.log.info(f"Notif HTTP {rn.status_code}, lewati")
+                return
+
+            data_list = rn.json()
+            if not isinstance(data_list, list) or len(data_list) == 0:
+                self.log.info("Tidak ada notifikasi presensi")
+                return
+
+            open_sessions_found = 0
+
+            # Periksa hingga 10 notifikasi presensi terbaru (slot lebih longgar
+            # karena notifikasi basi dilewati tanpa memakan jatah)
+            for notif in data_list[:10]:
+                ket = notif.get("keterangan", "")
+                if "Dosen telah membuka presensi" not in ket:
+                    continue
+
+                data_terkait = notif.get("dataTerkait", "")
+                if "-" not in data_terkait:
+                    continue
+
+                parts = data_terkait.rsplit("-", 1)
+                kuliah, js = parts[0].strip(), parts[1].strip()
+                idx = ket.find("untuk matakuliah ")
+                matkul = ket[idx + 17:].strip() if idx >= 0 else ket.strip()
+
+                # Filter kesegaran: notifikasi lebih tua dari 1 jam dianggap sesi basi.
+                # Mencegah submit ulang sesi lama (mis. sesi minggu lalu yang belum
+                # ditutup dosen) pada run berikutnya.
+                notif_dt = parse_notif_time(notif)
+                if notif_dt is None:
+                    self.log.warning(f"Tidak bisa parsing waktu notifikasi {matkul} (ID {kuliah}), tetap diproses")
+                elif (datetime.now(timezone.utc) - notif_dt).total_seconds() > NOTIF_MAX_AGE_SECONDS:
+                    age_min = (datetime.now(timezone.utc) - notif_dt).total_seconds() / 60
+                    self.log.info(f"Notifikasi {matkul} (ID {kuliah}) basi ({age_min:.0f} menit lalu), lewati")
+                    continue
+
+                ra = self.session.get(
+                    f"https://ethol.pens.ac.id/api/presensi/aktif-kuliah?kuliah={kuliah}&jenis_schema={js}",
+                    timeout=15
+                )
+                if ra.status_code != 200:
+                    self.log.error(f"Gagal akses aktif-kuliah {matkul} (HTTP {ra.status_code})")
+                    continue
+
+                aktif_raw = ra.json()
+                aktif_data = aktif_raw[0] if isinstance(aktif_raw, list) and aktif_raw else (aktif_raw if isinstance(aktif_raw, dict) else {})
+
+                if aktif_data.get("open") != 1:
+                    self.log.info(f"Presensi {matkul} (ID {kuliah}) tidak aktif / sudah ditutup (LOCKED)")
+                    continue
+
+                open_sessions_found += 1
+                self.log.info(f"📢 Presensi AKTIF & TERBUKA: {matkul} (Kuliah ID: {kuliah})")
+
+                # 4. Pengecekan Khusus Matakuliah 2 Mingguan (Sistem Kloter / Shift)
+                manual_ids = get_manual_kuliah_ids()
+                if str(kuliah) in manual_ids:
+                    self.log.info(f"Matakuliah {matkul} (ID {kuliah}) adalah jadwal 2 mingguan (Kloter). Mengirim peringatan manual...")
+                    log_to_firebase(matkul, "KLOTER_ALERT", f"Peringatan presensi kloter 2 mingguan dikirim ke {self.label} (Kuliah ID: {kuliah})")
+                    msg = (
+                        f"📢 *PERINGATAN: Presensi Dibuka (Sistem Kloter 2 Minggu Sekali)*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul} (ID: {kuliah})\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"⚠️ *Perhatian Khusus:*\n"
+                        f"Mata kuliah ini berlangsung secara *2 minggu sekali (Sistem Kloter/Shift)*.\n"
+                        f"Bot sengaja *tidak melakukan presensi otomatis* agar tidak salah absen di luar jadwal kloter Anda.\n\n"
+                        f"👉 *Jika hari ini adalah jadwal kloter Anda, silakan segera lakukan presensi manual di ETHOL:*\n"
+                        f"https://ethol.pens.ac.id"
+                    )
+                    notify_client(self.config, msg)
+                    continue
+
+                # 5. Pengecekan Kunci Presensi
+                key = aktif_data.get("key", "")
+                if not key or not self.student_number:
+                    self.log.warning(f"Key presensi kosong atau student_number tidak ada ({matkul})")
+                    log_to_firebase(matkul, "KEY_EMPTY", f"Key presensi kosong untuk {self.label}")
+                    msg = (
+                        f"⚠️ *Presensi Terbuka tapi Kunci Belum Ada*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul}\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"_Kunci presensi belum tersedia di server. Harap presensi manual di web ETHOL._"
+                    )
+                    notify_client(self.config, msg)
+                    continue
+
+                # 6. Cek idempoten: lewati jika presensi ini sudah tercatat sukses hari ini
+                # (mencegah submit duplikat saat cron dan dispatch ESP32 berjalan bersamaan)
+                student_id = self.student_number or self.user
+                if is_presensi_done(kuliah, student_id):
+                    self.log.info(f"Presensi {matkul} (ID {kuliah}) sudah tercatat hari ini untuk {self.label}, lewati submit duplikat")
+                    continue
+
+                # 7. Submit Presensi ke ETHOL
+                payload = {
+                    "kuliah": int(kuliah), "jenis_schema": int(js),
+                    "mahasiswa": int(self.student_number),
+                    "key": key, "kuliah_asal": int(kuliah)
+                }
+                rs = self.session.post("https://ethol.pens.ac.id/api/presensi/mahasiswa",
+                                       json=payload, timeout=15)
+                rs_data = rs.json() if "application/json" in rs.headers.get("content-type","") else {}
+                sukses = rs.status_code == 200 and rs_data.get("sukses") is True
+                pesan = rs_data.get("pesan", "")
+
+                self.log.info(f"Submit {matkul} HTTP {rs.status_code} sukses={sukses} pesan={pesan}")
+
+                if sukses:
+                    mark_presensi_done(kuliah, student_id)
+                    log_to_firebase(matkul, "SUCCESS", f"Presensi berhasil untuk {self.label}")
+                    msg = (
+                        f"✅ *Presensi Berhasil!*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul}\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"_Presensi otomatis via ETHOL Bot._"
+                    )
+                    notify_client(self.config, msg)
+                elif is_already_present_msg(pesan):
+                    # Client sudah tercatat presensi (manual atau worker lain yang lebih dulu).
+                    # Tandai selesai agar worker berikutnya tidak submit ulang / kirim WA alarm.
+                    mark_presensi_done(kuliah, student_id)
+                    log_to_firebase(matkul, "ALREADY_PRESENT", f"Akun {self.label} sudah presensi ({pesan})")
+                    msg = (
+                        f"ℹ️ *Status: Sudah Melakukan Presensi Manual*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul}\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"_{pesan or 'Anda telah tercatat melakukan presensi secara manual sebelumnya.'}_\n"
+                        f"_Tidak perlu melakukan presensi ulang._"
+                    )
+                    notify_client(self.config, msg)
+                else:
+                    log_to_firebase(matkul, "FAILED", f"Gagal presensi {self.label} ({matkul}): {pesan}")
+                    msg = (
+                        f"⚠️ *Gagal Presensi Otomatis*\n\n"
+                        f"👤 *Akun:* {self.label}\n"
+                        f"📚 *Mata Kuliah:* {matkul}\n"
+                        f"⏰ *Waktu:* {when}\n\n"
+                        f"_{pesan or 'server menolak submit presensi'} — segera lakukan presensi manual!_"
+                    )
+                    notify_client(self.config, msg)
+
+            if open_sessions_found == 0:
+                self.log.info("Tidak ada sesi presensi yang sedang berstatus OPEN")
+        except Exception as e:
+            self.log.error(f"Exception run_once: {e}")
+            log_to_firebase("System Worker", "EXCEPTION", f"Worker error pada {self.label}: {str(e)[:100]}")
+            msg = (
+                f"⚠️ *Kendala Presensi Otomatis*\n\n"
+                f"👤 *Akun:* {self.label}\n"
+                f"❌ *Kendala:* Gangguan koneksi / runtime ({type(e).__name__})\n"
+                f"⏰ *Waktu:* {when}\n\n"
+                f"_Segera buka https://ethol.pens.ac.id untuk presensi manual._"
+            )
+            notify_client(self.config, msg)
+
+
+def handle_verification(target_user: str = ""):
+    """Menjalankan verifikasi akun ETHOL / MIS dan menyimpan statusnya ke Firebase."""
+    logging.info(f"=== Menjalankan Verifikasi Akun ETHOL (Target: {target_user or 'Semua Akun'}) ===")
+
+    try:
+        r = requests.get(f"{FIREBASE_URL}/accounts.json", timeout=10)
+        raw_data = r.json() if r.status_code == 200 else []
+        accounts_list = raw_data if isinstance(raw_data, list) else (list(raw_data.values()) if isinstance(raw_data, dict) else [])
+    except Exception as e:
+        logging.error(f"Gagal mengambil accounts dari Firebase: {e}")
+        return
+
+    verified_count = 0
+    last_result = {}
+
+    for acc in accounts_list:
+        user = acc.get("user", "")
+        if target_user and target_user.lower() not in ("all", "") and user.lower() != target_user.lower():
+            continue
+
+        worker = AccountWorker(acc)
+        res = worker.verify()
+        when = timestamp_str()
+
+        if res["success"]:
+            verified_count += 1
+            acc["verified"] = True
+            acc["nrp"] = res["nomor"]
+            acc["official_name"] = res["nama"]
+            acc["last_verified"] = when
+            acc["verify_status"] = "OK"
+            acc["verify_message"] = "Akun Valid & Terverifikasi"
+            last_result = {
+                "status": "SUCCESS",
+                "user": user,
+                "nama": res["nama"],
+                "nrp": res["nomor"],
+                "timestamp": when
+            }
+            log_to_firebase("Verifikasi Akun", "VERIFIED_OK", f"Akun {user} valid. Nama: {res['nama']}, NRP: {res['nomor']}")
+        else:
+            acc["verified"] = False
+            acc["last_verified"] = when
+            acc["verify_status"] = "FAILED"
+            acc["verify_message"] = res["error"]
+            last_result = {
+                "status": "FAILED",
+                "user": user,
+                "error": res["error"],
+                "timestamp": when
+            }
+            log_to_firebase("Verifikasi Akun", "VERIFIED_FAIL", f"Akun {user} gagal verifikasi: {res['error']}")
+
+    try:
+        requests.put(f"{FIREBASE_URL}/accounts.json", json=accounts_list, timeout=10)
+        if last_result:
+            requests.put(f"{FIREBASE_URL}/verify_result.json", json=last_result, timeout=10)
+        requests.put(f"{FIREBASE_URL}/verify_request/status.json", json="DONE", timeout=10)
+        logging.info(f"✅ Selesai verifikasi akun (Berhasil: {verified_count}/{len(accounts_list)}).")
+    except Exception as e:
+        logging.error(f"Gagal simpan hasil verifikasi ke Firebase: {e}")
+
+
+def run_worker(config):
+    AccountWorker(config).run_once()
+
+
+def main():
+    # 1. Cek apakah ada request verifikasi akun (dari Event Payload, Env, atau Firebase)
+    client_payload_raw = os.environ.get("CLIENT_PAYLOAD", "{}")
+    event_action = os.environ.get("GITHUB_EVENT_ACTION", "")
+    try:
+        payload = json.loads(client_payload_raw) if client_payload_raw else {}
+    except Exception:
+        payload = {}
+
+    target_user = payload.get("target_user") or os.environ.get("TARGET_USER", "")
+    action = payload.get("action") or event_action
+
+    # Cek juga dari Firebase verify_request jika pending
+    if not target_user and not action:
+        try:
+            r = requests.get(f"{FIREBASE_URL}/verify_request.json", timeout=5)
+            if r.status_code == 200 and r.json():
+                req = r.json()
+                if req.get("status") == "PENDING":
+                    action = "verify"
+                    target_user = req.get("user", "all")
+        except Exception:
+            pass
+
+    if action in ("verify", "ethol_verify_account"):
+        handle_verification(target_user)
+        return
+
+    # 2. Jalankan Cloud Watchdog untuk kesehatan ESP32
+    check_esp32_offline_watchdog()
+
+    # 3. Proses presensi multi-akun aktif
+    accounts = get_active_accounts()
+    if not accounts:
+        logging.warning("Tidak ada akun aktif di Firebase / ACCOUNTS_JSON!")
+        return
+
+    logging.info(f"=== ETHOL Cloud Worker - {len(accounts)} Akun Aktif | {now_wib().strftime('%d-%m-%Y %H:%M WIB')} ===")
+
+    threads = []
+    for acc in accounts:
+        t = threading.Thread(target=run_worker, args=(acc,), name=acc.get("name", acc["user"].split("@")[0]))
+        t.start()
+        threads.append(t)
+        time.sleep(2)
+
+    for t in threads:
+        t.join(timeout=120)
+
+    logging.info("=== Semua Akun Selesai Diproses ===")
+
+
+if __name__ == "__main__":
+    main()
