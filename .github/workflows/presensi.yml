@@ -37,6 +37,7 @@ jobs:
         run: pip install requests pytz
 
       - name: Run ETHOL Bot / Verifier
+        shell: bash
         env:
           FONNTE_TOKEN: ${{ secrets.FONNTE_TOKEN }}
           ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
@@ -49,7 +50,15 @@ jobs:
           GITHUB_EVENT_ACTION: ${{ github.event.action }}
           CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: |
-          python cloud-worker/app_actions.py 2>&1 | tee bot_log.txt
+          set -eo pipefail
+          if [ -f "app_actions.py" ]; then
+            python app_actions.py 2>&1 | tee bot_log.txt
+          elif [ -f "cloud-worker/app_actions.py" ]; then
+            python cloud-worker/app_actions.py 2>&1 | tee bot_log.txt
+          else
+            echo "::error::File app_actions.py tidak ditemukan di root maupun cloud-worker/!" >&2
+            exit 1
+          fi
 
       - name: Upload Log File (.txt)
         if: always()
