@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ETHOL Bot Controller</title>
+  <link rel="icon" href="https://ethol.pens.ac.id/favicon.ico" />
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#eef2ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-indigo-500 selection:text-white"
+      x-data="app()" x-init="initApp()" x-cloak>
+
+  <!-- LOGIN MODAL / GATE -->
+  <div x-show="!isAuthenticated" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md px-4">
+    <div class="bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center">
+      <div class="w-16 h-16 bg-indigo-600/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-indigo-500/30">
+        <i class="fa-solid fa-shield-halved text-2xl"></i>
+      </div>
+      <h2 class="text-2xl font-bold text-white mb-1">ETHOL Bot Controller</h2>
+      <p class="text-slate-400 text-sm mb-6">Masukkan PIN Master untuk mengelola akun dan bot.</p>
+      
+      <form @submit.prevent="verifyPin()">
+        <div class="mb-4">
+          <input type="password" x-model="pinInput" placeholder="••••••" autofocus
+                 class="w-full text-center tracking-widest text-2xl px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500 text-white placeholder-slate-600" />
+          <p x-show="pinError" class="text-rose-400 text-xs mt-2" x-text="pinError"></p>
+        </div>
+        <button type="submit" :disabled="loading"
+                class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-lock-open" x-show="!loading"></i>
+          <i class="fa-solid fa-spinner fa-spin" x-show="loading"></i>
+          <span>Buka Dashboard</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MAIN DASHBOARD -->
+  <div x-show="isAuthenticated" class="max-w-6xl mx-auto px-4 py-6 md:py-10 space-y-6">
+
+    <!-- HEADER -->
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800/80 p-5 rounded-2xl backdrop-blur">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
+          <i class="fa-solid fa-robot text-xl text-white"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-white flex items-center gap-2">
+            ETHOL Bot Dashboard
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Hybrid Realtime</span>
+          </h1>
+          <p class="text-xs text-slate-400">Dashboard ➔ GitHub Actions ➔ Firebase Sync (ESP32 opsional)</p>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-2">
+        <button @click="openConfigModal()" title="Pengaturan Token"
+                class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-gear"></i>
+          <span>Pengaturan</span>
+        </button>
+        <button @click="triggerCloudPresensi()" :disabled="actionLoading"
+                class="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold flex items-center gap-2 transition">
+          <i class="fa-solid fa-bolt" :class="{'fa-spin': actionLoading}"></i>
+          <span>Trigger Presensi</span>
+        </button>
+        <button @click="logout()" title="Logout"
+                class="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs border border-slate-700 transition">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- STATUS BANNER & METRICS -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <!-- ESP32 STATUS -->
+      <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">ESP32 Hardware</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+                :class="isEspOnline ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'">
+            <span class="w-2 h-2 rounded-full" :class="isEspOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'"></span>
+            <span x-text="isEspOnline ? 'ONLINE' : 'OFFLINE'"></span>
+          </span>
+        </div>
+        <p class="text-lg font-bold text-white truncate" x-text="isEspOnline ? (deviceStatus.last_checked_matkul || 'Standby') : 'Hardware Offline / Mati'"></p>
+        <p class="text-xs text-slate-500 mt-1" x-text="pingStatusText"></p>
+      </div>
+
+      <!-- ACTIVE ACCOUNTS -->
+      <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Akun Aktif</span>
+          <i class="fa-solid fa-users text-indigo-400"></i>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span class="text-2xl font-bold text-white" x-text="accounts.filter(a => a.is_active).length"></span>
+          <span class="text-xs text-slate-400" x-text="'dari ' + accounts.length + ' total akun'"></span>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Hanya akun aktif yang diabsenkan</p>
+      </div>
+
+      <!-- NOTIFICATION CHANNELS -->
+      <div class="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Notifikasi Client</span>
+          <span class="text-xs text-emerald-400 font-semibold">Multi-Channel</span>
+        </div>
+        <div class="flex items-center gap-2.5 mt-1">
+          <button @click.stop.prevent="testWhatsAppChannel()" :disabled="testingWa"
+                  class="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 px-3 py-1.5 rounded-lg border border-emerald-500/30 font-semibold transition cursor-pointer disabled:opacity-50"
+                  title="Klik untuk test koneksi WhatsApp Fonnte">
+            <i class="fa-brands fa-whatsapp text-sm" :class="{'fa-spin': testingWa}"></i>
+            <span x-text="testingWa ? 'Testing...' : 'Test WA'"></span>
+          </button>
+          <button @click.stop.prevent="testTelegramChannel()" :disabled="testingTg"
+                  class="flex items-center gap-1.5 text-xs text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 active:scale-95 px-3 py-1.5 rounded-lg border border-sky-500/30 font-semibold transition cursor-pointer disabled:opacity-50"
+                  title="Klik untuk test token Telegram Bot">
+            <i class="fa-brands fa-telegram text-sm" :class="{'fa-spin': testingTg}"></i>
+            <span x-text="testingTg ? 'Testing...' : 'Test Telegram'"></span>
+          </button>
+        </div>
+        <p class="text-xs text-slate-500 mt-2">Klik tombol di atas untuk test gateway WA & Tele</p>
+      </div>
+    </div>
+
+    <!-- JADWAL KULIAH SECTION -->
+    <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-6">
+      <!-- Header -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div>
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+              <i class="fa-solid fa-calendar-week text-lg"></i>
+            </div>
+            <div>
+              <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                <span>Jadwal Kuliah Mahasiswa</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold"
+                      x-text="jadwalData.tahun_ajaran_aktif ? 'TA ' + jadwalData.tahun_ajaran_aktif + ' (' + (jadwalData.semester_aktif === 1 ? 'Ganjil' : 'Genap') + ')' : 'Semester Aktif'"></span>
+              </h2>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Jadwal resmi terintegrasi langsung dengan server ETHOL & status presensi realtime.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sync Button & Last Updated -->
+        <div class="flex items-center gap-3 self-end md:self-auto">
+          <div class="text-right hidden sm:block">
+            <span class="text-[10px] text-slate-500 uppercase tracking-wider block">Sinkronisasi Terakhir</span>
+            <span class="text-xs text-slate-300 font-mono" x-text="jadwalData.last_updated || 'Belum tersinkron'"></span>
+          </div>
+          <button @click="syncJadwal()" :disabled="syncingJadwal"
+                  class="px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 active:scale-95 text-indigo-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-2 border border-indigo-500/30 transition cursor-pointer disabled:opacity-50"
+                  title="Sinkronkan jadwal terbaru dari server ETHOL">
+            <i class="fa-solid fa-arrows-rotate text-sm" :class="{'fa-spin': syncingJadwal}"></i>
+            <span x-text="syncingJadwal ? 'Menyinkronkan...' : 'Sinkronkan Jadwal'"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Stats / Mini Cards -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div class="bg-slate-800/40 border border-slate-700/40 rounded-xl p-3">
+          <span class="text-[11px] text-slate-400 block font-medium">Hari Ini</span>
+          <span class="text-sm font-bold text-white block mt-0.5" x-text="getTodayFormattedIndo()"></span>
+        </div>
+        <div class="bg-slate-800/40 border border-slate-700/40 rounded-xl p-3">
+          <span class="text-[11px] text-slate-400 block font-medium">Matkul Hari Ini</span>
+          <span class="text-sm font-bold text-indigo-400 block mt-0.5" x-text="todayMatkulCount + ' Mata Kuliah'"></span>
+        </div>
+        <div class="bg-slate-800/40 border border-slate-700/40 rounded-xl p-3">
+          <span class="text-[11px] text-slate-400 block font-medium">Presensi Hari Ini</span>
+          <div class="flex items-center gap-1.5 mt-0.5">
+            <span class="text-sm font-bold block"
+                  :class="todayDoneMatkulCount >= todayMatkulCount && todayMatkulCount > 0 ? 'text-emerald-400' : 'text-amber-400'"
+                  x-text="todayDoneMatkulCount + ' / ' + todayMatkulCount + ' Selesai'"></span>
+            <template x-if="todayDoneMatkulCount >= todayMatkulCount && todayMatkulCount > 0">
+              <i class="fa-solid fa-circle-check text-emerald-400 text-xs"></i>
+            </template>
+          </div>
+        </div>
+        <div class="bg-slate-800/40 border border-slate-700/40 rounded-xl p-3">
+          <span class="text-[11px] text-slate-400 block font-medium">Total Matkul Semester</span>
+          <span class="text-sm font-bold text-slate-200 block mt-0.5" x-text="(jadwalData.total_matkul || (jadwalData.jadwal ? jadwalData.jadwal.length : 0)) + ' Mata Kuliah'"></span>
+        </div>
+      </div>
+
+      <!-- Day Filter Tabs -->
+      <div class="flex items-center gap-2 overflow-x-auto pb-2 mb-5 border-b border-slate-800 scrollbar-none">
+        <button @click="selectedDay = 'today'"
+                class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                :class="selectedDay === 'today' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-700/50'">
+          <i class="fa-solid fa-calendar-day text-xs"></i>
+          <span>Hari Ini</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-full font-bold"
+                :class="selectedDay === 'today' ? 'bg-indigo-800 text-white' : 'bg-slate-700 text-slate-300'"
+                x-text="todayMatkulCount"></span>
+        </button>
+
+        <button @click="selectedDay = 'all'"
+                class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                :class="selectedDay === 'all' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-700/50'">
+          <span>Semua Hari</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-full font-bold"
+                :class="selectedDay === 'all' ? 'bg-indigo-800 text-white' : 'bg-slate-700 text-slate-300'"
+                x-text="jadwalData.jadwal ? jadwalData.jadwal.length : 0"></span>
+        </button>
+
+        <template x-for="day in ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jum\'at']" :key="day">
+          <button @click="selectedDay = day"
+                  class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                  :class="selectedDay === day ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-700/50'">
+            <span x-text="day"></span>
+            <span class="text-[10px] px-1.5 py-0.2 rounded-full font-bold"
+                  :class="selectedDay === day ? 'bg-indigo-800 text-white' : 'bg-slate-700 text-slate-300'"
+                  x-text="getDayCount(day)"></span>
+          </button>
+        </template>
+      </div>
+
+      <!-- Jadwal Cards Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <template x-for="(item, idx) in filteredJadwal" :key="idx">
+          <div class="border rounded-xl p-4 flex flex-col justify-between hover:border-slate-500 transition group"
+               :class="[
+                 isPresensiDone(item.kuliah) ? 'border-emerald-500/40 bg-emerald-950/20' :
+                 item.is_kloter ? 'border-amber-500/40 bg-amber-950/20' :
+                 isTodayCourse(item.hari) ? 'border-indigo-500/50 bg-indigo-950/20' :
+                 'border-slate-700/60 bg-slate-800/60'
+               ]">
+            <div>
+              <!-- Top Row: Time & Room & Day -->
+              <div class="flex items-center justify-between gap-2 mb-2.5">
+                <div class="flex items-center gap-1.5 text-xs font-semibold"
+                     :class="isTodayCourse(item.hari) ? 'text-indigo-300' : 'text-slate-300'">
+                  <i class="fa-regular fa-clock text-xs text-indigo-400"></i>
+                  <span x-text="item.jam_awal + ' - ' + item.jam_akhir + ' WIB'"></span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[11px] px-2 py-0.5 rounded-lg bg-slate-700/60 text-slate-300 border border-slate-600/40 font-mono"
+                        x-text="item.ruang ? 'Ruang ' + item.ruang : '-'"></span>
+                  <span class="text-[11px] px-2 py-0.5 rounded-lg font-semibold"
+                        :class="isTodayCourse(item.hari) ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'bg-slate-800 text-slate-400 border border-slate-700/50'"
+                        x-text="item.hari"></span>
+                </div>
+              </div>
+
+              <!-- Course Title -->
+              <h3 class="font-bold text-white text-sm leading-snug group-hover:text-indigo-200 transition"
+                  x-text="item.matkul"></h3>
+
+              <!-- Lecturer -->
+              <div class="flex items-center gap-1.5 text-xs text-slate-400 mt-2 truncate">
+                <i class="fa-solid fa-chalkboard-user text-slate-500 text-[11px] flex-shrink-0"></i>
+                <span class="truncate" x-text="item.dosen || 'Dosen Pengampu'"></span>
+              </div>
+
+              <!-- Class & Parallel -->
+              <div class="flex items-center gap-2 text-[11px] text-slate-500 mt-1">
+                <span class="flex items-center gap-1">
+                  <i class="fa-solid fa-users text-[10px]"></i>
+                  <span x-text="item.kode_kelas ? item.kode_kelas + (item.pararel ? ' (' + item.pararel + ')' : '') : '-'"></span>
+                </span>
+                <span>•</span>
+                <span class="font-mono text-slate-400" x-text="'ID: ' + item.kuliah"></span>
+              </div>
+            </div>
+
+            <!-- Footer: Status Badges & Quick Action -->
+            <div class="mt-4 pt-3 border-t border-slate-700/50 flex items-center justify-between gap-2">
+              <div>
+                <!-- Status 1: Sudah Presensi -->
+                <template x-if="isPresensiDone(item.kuliah)">
+                  <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold"
+                        :title="'Tercatat presensi sukses hari ini untuk ' + presensiDoneCount(item.kuliah) + ' akun mahasiswa'">
+                    <i class="fa-solid fa-circle-check text-[10px]"></i>
+                    <span x-text="'Sudah Presensi (' + presensiDoneCount(item.kuliah) + ')'"></span>
+                  </span>
+                </template>
+
+                <!-- Status 2: Kloter 2 Minggu Sekali -->
+                <template x-if="!isPresensiDone(item.kuliah) && item.is_kloter">
+                  <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 font-semibold"
+                        title="Mata kuliah jadwal 2 mingguan. Presensi manual di web ETHOL jika jadwal kloter Anda.">
+                    <i class="fa-solid fa-calendar-minus text-[10px]"></i>
+                    <span>Shift Kloter</span>
+                  </span>
+                </template>
+
+                <!-- Status 3: Hari Ini (Belum Selesai) -->
+                <template x-if="!isPresensiDone(item.kuliah) && !item.is_kloter && isTodayCourse(item.hari)">
+                  <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-semibold"
+                        title="Jadwal aktif hari ini, bot otomatis mendeteksi ketika dosen membuka sesi presensi">
+                    <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping"></span>
+                    <span>Hari Ini</span>
+                  </span>
+                </template>
+
+                <!-- Status 4: Hari Lain -->
+                <template x-if="!isPresensiDone(item.kuliah) && !item.is_kloter && !isTodayCourse(item.hari)">
+                  <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700/60 font-medium">
+                    <i class="fa-regular fa-calendar text-[10px]"></i>
+                    <span x-text="'Jadwal ' + item.hari"></span>
+                  </span>
+                </template>
+              </div>
+
+              <!-- Quick Trigger Button -->
+              <button @click="triggerMatkul(item)" :disabled="actionLoading"
+                      class="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 active:scale-95 text-indigo-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1 border border-indigo-500/30 transition cursor-pointer disabled:opacity-50"
+                      :title="'Trigger instan presensi untuk ' + item.matkul">
+                <i class="fa-solid fa-bolt text-amber-400 text-[10px]"></i>
+                <span>Presensi</span>
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Empty State if no classes found -->
+      <template x-if="filteredJadwal.length === 0">
+        <div class="py-12 text-center bg-slate-800/30 rounded-xl border border-slate-800/60 mt-2">
+          <i class="fa-solid fa-calendar-xmark text-3xl text-slate-600 mb-2 block"></i>
+          <p class="text-sm font-semibold text-slate-300">Tidak ada jadwal kuliah untuk hari ini</p>
+          <p class="text-xs text-slate-500 mt-1">Pilih tab "Semua Hari" atau hari lain untuk melihat jadwal perkuliahan lainnya.</p>
+        </div>
+      </template>
+    </div>
+
+    <!-- ACCOUNTS SECTION -->
+    <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-6">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-address-card text-indigo-400"></i>
+            Daftar Akun Mahasiswa
+          </h2>
+          <p class="text-xs text-slate-400">Gunakan tombol <b>Test Client</b> untuk memverifikasi koneksi notifikasi WhatsApp & Telegram per akun.</p>
+        </div>
+        <button @click="openAddAccountModal()"
+                class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-lg shadow-indigo-600/20">
+          <i class="fa-solid fa-plus"></i>
+          <span>Tambah Akun</span>
+        </button>
+      </div>
+
+      <!-- ACCOUNT CARDS GRID -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <template x-for="(acc, index) in accounts" :key="index">
+          <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between hover:border-slate-600 transition"
+               :class="acc.is_active ? 'border-l-4 border-l-indigo-500' : 'opacity-70 border-l-4 border-l-slate-600'">
+            <div>
+              <div class="flex items-start justify-between gap-2 mb-2">
+                <div class="truncate">
+                  <div class="flex items-center gap-2">
+                    <h3 class="font-bold text-white text-sm" x-text="acc.name || acc.user.split('@')[0]"></h3>
+                    <template x-if="acc.verified">
+                      <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium"
+                            :title="'Terverifikasi SSO ETHOL. NRP: ' + (acc.nrp || '-')">
+                        <i class="fa-solid fa-circle-check"></i>
+                        <span x-text="'ETHOL OK (' + (acc.nrp || 'Verified') + ')'"></span>
+                      </span>
+                    </template>
+                    <template x-if="acc.verified === false && acc.verify_status === 'FAILED'">
+                      <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 font-medium"
+                            :title="acc.verify_message || 'Gagal login'">
+                        <i class="fa-solid fa-circle-xmark"></i>
+                        <span>Gagal Login</span>
+                      </span>
+                    </template>
+                  </div>
+                  <p class="text-xs text-slate-400 truncate mt-0.5" x-text="acc.user"></p>
+                </div>
+                
+                <!-- TOGGLE SWITCH REALTIME -->
+                <button @click="toggleAccount(index)"
+                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                        :class="acc.is_active ? 'bg-indigo-600' : 'bg-slate-700'">
+                  <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"
+                        :class="acc.is_active ? 'translate-x-5' : 'translate-x-0'"></span>
+                </button>
+              </div>
+
+              <!-- CLIENT NOTIFICATION CHANNELS -->
+              <div class="space-y-1.5 mt-3 pt-3 border-t border-slate-700/50 text-xs text-slate-300">
+                <!-- WhatsApp Target -->
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2 truncate">
+                    <i class="fa-brands fa-whatsapp text-emerald-400 text-sm"></i>
+                    <span class="font-mono text-[11px]" x-text="acc.wa_target || 'Tanpa no. WA'"></span>
+                  </div>
+                  <span x-show="acc.wa_target" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">WA</span>
+                </div>
+
+                <!-- Telegram Target -->
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2 truncate">
+                    <i class="fa-brands fa-telegram text-sky-400 text-sm"></i>
+                    <span class="font-mono text-[11px]" x-text="acc.tg_chat_id || 'Tanpa Telegram'"></span>
+                  </div>
+                  <span x-show="acc.tg_chat_id" class="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-semibold">Tele</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- ACTION BAR: TEST CLIENT, CEK ETHOL, EDIT, DELETE -->
+            <div class="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-slate-700/30">
+              <div class="flex items-center gap-1.5">
+                <button @click.stop.prevent="testClientNotification(index)"
+                        :disabled="testingIndex !== null || (!acc.wa_target && !acc.tg_chat_id)"
+                        class="px-2.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Kirim pesan uji coba ke WhatsApp & Telegram akun ini">
+                  <i class="fa-solid" :class="testingIndex === index ? 'fa-spinner fa-spin' : 'fa-paper-plane'"></i>
+                  <span x-text="testingIndex === index ? 'Mengirim...' : 'Test Client'"></span>
+                </button>
+
+                <button @click.stop.prevent="verifyEtholAccount(index)"
+                        :disabled="verifyingIndex !== null"
+                        class="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Verifikasi koneksi login MIS CAS dan token SSO ETHOL akun ini">
+                  <i class="fa-solid" :class="verifyingIndex === index ? 'fa-spinner fa-spin' : 'fa-graduation-cap'"></i>
+                  <span x-text="verifyingIndex === index ? 'Verifikasi...' : 'Cek ETHOL'"></span>
+                </button>
+              </div>
+
+              <div class="flex items-center gap-1">
+                <button @click="openEditAccountModal(index)" class="p-1.5 text-slate-400 hover:text-white text-xs flex items-center gap-1 transition" title="Edit Akun">
+                  <i class="fa-solid fa-pen-to-square"></i>
+                  <span>Edit</span>
+                </button>
+                <button @click="deleteAccount(index)" class="p-1.5 text-slate-400 hover:text-rose-400 text-xs flex items-center gap-1 transition" title="Hapus Akun">
+                  <i class="fa-solid fa-trash"></i>
+                  <span>Hapus</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ACTIVITY & ATTENDANCE LOG -->
+    <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-clock-rotate-left text-indigo-400"></i>
+            Riwayat Presensi & Log
+          </h2>
+          <p class="text-xs text-slate-400">Log aktivitas realtime dari ESP32, Cloud Worker, dan Client Test.</p>
+        </div>
+        <button @click="loadData()" class="p-2 text-slate-400 hover:text-white transition" title="Refresh">
+          <i class="fa-solid fa-rotate-right" :class="{'fa-spin': loading}"></i>
+        </button>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs text-slate-300">
+          <thead class="bg-slate-800/60 text-slate-400 uppercase font-semibold border-b border-slate-700/60">
+            <tr>
+              <th class="px-4 py-3">Waktu</th>
+              <th class="px-4 py-3">Mata Kuliah / Event</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Detail</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/60">
+            <template x-for="(h, idx) in history" :key="idx">
+              <tr class="hover:bg-slate-800/30 transition">
+                <td class="px-4 py-3 font-mono text-slate-400 whitespace-nowrap" x-text="h.timestamp"></td>
+                <td class="px-4 py-3 font-semibold text-white" x-text="h.matkul"></td>
+                <td class="px-4 py-3">
+                  <span class="px-2 py-0.5 rounded-full font-semibold text-[10px]"
+                        :class="h.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : (h.status === 'ALREADY_PRESENT' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/30' : (h.status === 'KLOTER_ALERT' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/30' : (h.status === 'TEST_OK' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30' : (h.status === 'OFFLINE_ALERT' || h.status === 'LOGIN_FAILED' || h.status === 'SSO_FAILED' || h.status === 'FAILED' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'))))"
+                        x-text="h.status"></span>
+                </td>
+                <td class="px-4 py-3 text-slate-400" x-text="h.message || '-'"></td>
+              </tr>
+            </template>
+            <tr x-show="history.length === 0">
+              <td colspan="4" class="px-4 py-8 text-center text-slate-500">Belum ada riwayat tercatat</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MODAL TAMBAH / EDIT AKUN -->
+  <div x-show="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-4">
+    <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full shadow-2xl space-y-4">
+      <h3 class="text-lg font-bold text-white" x-text="isEditing ? 'Edit Akun' : 'Tambah Akun Baru'"></h3>
+      
+      <form @submit.prevent="saveAccount()" class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Nama Panggilan / Label</label>
+          <input type="text" x-model="modalForm.name" required placeholder="Contoh: Syauqi"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold">Email SSO PENS</label>
+          <input type="email" x-model="modalForm.user" required placeholder="contoh@ee.student.pens.ac.id"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+        
+        <!-- Password SSO (Dengan Show/Hide Toggle) -->
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
+            <span>Password SSO</span>
+            <button type="button" @click="showPass = !showPass" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
+              <i class="fa-solid" :class="showPass ? 'fa-eye-slash' : 'fa-eye'"></i>
+              <span x-text="showPass ? 'Sembunyikan' : 'Tampilkan'"></span>
+            </button>
+          </label>
+          <div class="relative">
+            <input :type="showPass ? 'text' : 'password'" x-model="modalForm.pass" required placeholder="Password SSO ETHOL"
+                   class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 pr-10" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center gap-1">
+            <i class="fa-brands fa-whatsapp text-emerald-400"></i> No. WhatsApp (Fonnte)
+          </label>
+          <input type="text" x-model="modalForm.wa_target" placeholder="Contoh: 6281234567890 (kosongkan jika tidak pakai)"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center gap-1">
+            <i class="fa-brands fa-telegram text-sky-400"></i> Telegram Chat ID
+          </label>
+          <input type="text" x-model="modalForm.tg_chat_id" placeholder="Contoh: 123456789 (kosongkan jika tidak pakai)"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-4">
+          <button type="button" @click="showModal = false"
+                  class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition">
+            Batal
+          </button>
+          <button type="submit"
+                  class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition">
+            Simpan
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL PENGATURAN TOKEN & KONFIGURASI -->
+  <div x-show="showConfigModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-4">
+    <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full shadow-2xl space-y-4">
+      <h3 class="text-lg font-bold text-white flex items-center gap-2">
+        <i class="fa-solid fa-gear text-indigo-400"></i>
+        Pengaturan Sistem
+      </h3>
+      
+      <form @submit.prevent="saveConfig()" class="space-y-3 text-xs">
+        <!-- Fonnte Token -->
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
+            <span class="flex items-center gap-1"><i class="fa-brands fa-whatsapp text-emerald-400"></i> Fonnte API Token (WhatsApp)</span>
+            <button type="button" @click="showFonnteToken = !showFonnteToken" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
+              <i class="fa-solid" :class="showFonnteToken ? 'fa-eye-slash' : 'fa-eye'"></i>
+              <span x-text="showFonnteToken ? 'Sembunyikan' : 'Tampilkan'"></span>
+            </button>
+          </label>
+          <div class="relative">
+            <input :type="showFonnteToken ? 'text' : 'password'" x-model="configForm.fonnte_token" placeholder="Token API Fonnte WhatsApp"
+                   class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono text-[11px] pr-10" />
+          </div>
+          <p class="text-[10px] text-slate-500 mt-1">Token API Fonnte untuk gateway pengiriman pesan WhatsApp.</p>
+        </div>
+
+        <!-- Telegram Token -->
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
+            <span class="flex items-center gap-1"><i class="fa-brands fa-telegram text-sky-400"></i> Telegram Bot Token (Opsional)</span>
+            <button type="button" @click="showTgToken = !showTgToken" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
+              <i class="fa-solid" :class="showTgToken ? 'fa-eye-slash' : 'fa-eye'"></i>
+              <span x-text="showTgToken ? 'Sembunyikan' : 'Tampilkan'"></span>
+            </button>
+          </label>
+          <div class="relative">
+            <input :type="showTgToken ? 'text' : 'password'" x-model="configForm.telegram_bot_token" placeholder="Contoh: 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"
+                   class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono text-[11px] pr-10" />
+          </div>
+          <p class="text-[10px] text-slate-500 mt-1">Token bot Telegram untuk pengiriman notifikasi ke Chat ID mahasiswa.</p>
+        </div>
+
+        <!-- GitHub Token -->
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center justify-between">
+            <span class="flex items-center gap-1"><i class="fa-brands fa-github text-slate-300"></i> GitHub Personal Access Token</span>
+            <button type="button" @click="showGhToken = !showGhToken" class="text-slate-500 hover:text-slate-300 text-[11px] flex items-center gap-1">
+              <i class="fa-solid" :class="showGhToken ? 'fa-eye-slash' : 'fa-eye'"></i>
+              <span x-text="showGhToken ? 'Sembunyikan' : 'Tampilkan'"></span>
+            </button>
+          </label>
+          <div class="relative">
+            <input :type="showGhToken ? 'text' : 'password'" x-model="configForm.github_token" placeholder="github_pat_..."
+                   class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono text-[11px] pr-10" />
+          </div>
+          <p class="text-[10px] text-slate-500 mt-1">Hanya disimpan di browser ini (localStorage), tidak dikirim ke server. Dipakai untuk trigger presensi &amp; sinkron jadwal.</p>
+        </div>
+
+        <!-- ID Matkul 2 Minggu Sekali (Kloter Manual) -->
+        <div>
+          <label class="block text-slate-400 mb-1 font-semibold flex items-center gap-1">
+            <i class="fa-solid fa-calendar-days text-amber-400"></i> ID Matkul 2 Minggu Sekali (Kloter Manual)
+          </label>
+          <input type="text" x-model="configForm.manual_kuliah_ids" placeholder="221835, 221847, 221839, 221840"
+                 class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 font-mono text-[11px]" />
+          <p class="text-[10px] text-slate-500 mt-1">Pisahkan dengan koma. Matkul ini tidak diabsen otomatis, bot hanya mengirim pengingat ke client untuk absen manual sesuai kloter.</p>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-4">
+          <button type="button" @click="showConfigModal = false"
+                  class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition">
+            Batal
+          </button>
+          <button type="submit"
+                  class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition">
+            Simpan Pengaturan
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- LOGIC SCRIPT -->
+  <script>
+    const FIREBASE_URL = "https://ethol-bot-default-rtdb.firebaseio.com";
+    const FONNTE_TOKEN = "";
+    const ADMIN_WA     = "";
+
+    function app() {
+      return {
+        isAuthenticated: false,
+        pinInput: "",
+        pinError: "",
+        loading: false,
+        actionLoading: false,
+        testingIndex: null,
+        verifyingIndex: null,
+        testingWa: false,
+        testingTg: false,
+        showFonnteToken: false,
+        showTgToken: false,
+        showGhToken: false,
+        showPass: false,
+        _localAlertSent: false,
+        accounts: [],
+        deviceStatus: {},
+        history: [],
+        config: {},
+        jadwalData: { last_updated: "", tahun_ajaran_aktif: "", semester_aktif: 1, total_matkul: 0, jadwal: [] },
+        presensiDoneToday: {},
+        selectedDay: 'today',
+        syncingJadwal: false,
+        showModal: false,
+        showConfigModal: false,
+        isEditing: false,
+        editIndex: -1,
+        modalForm: { name: "", user: "", pass: "", wa_target: "", tg_chat_id: "", is_active: true },
+        configForm: { fonnte_token: "", telegram_bot_token: "", github_token: "", manual_kuliah_ids: "221835, 221847, 221839, 221840" },
+
+        get lastSeenEpoch() {
+          if (this.deviceStatus.last_seen_epoch) {
+            return Number(this.deviceStatus.last_seen_epoch);
+          }
+          if (this.deviceStatus.last_seen && typeof this.deviceStatus.last_seen === 'string' && this.deviceStatus.last_seen.includes('-')) {
+            const raw = this.deviceStatus.last_seen.replace(' WIB', '').trim();
+            const parsed = new Date(raw.replace(' ', 'T') + '+07:00').getTime();
+            if (!isNaN(parsed)) return Math.floor(parsed / 1000);
+          }
+          return 0;
+        },
+
+        get isEspOnline() {
+          const epoch = this.lastSeenEpoch;
+          if (!epoch) return false;
+          const nowEpoch = Math.floor(Date.now() / 1000);
+          const diffSeconds = nowEpoch - epoch;
+          // Toleransi 70 detik (ESP32 heartbeat setiap 30 detik)
+          const online = diffSeconds >= 0 && diffSeconds < 70;
+          if (online) this._localAlertSent = false;
+          return online;
+        },
+
+        get pingStatusText() {
+          const epoch = this.lastSeenEpoch;
+          if (!epoch) return "Ping: Belum pernah tersambung";
+          const nowEpoch = Math.floor(Date.now() / 1000);
+          const diffSeconds = Math.max(0, nowEpoch - epoch);
+          if (diffSeconds < 60) return `Ping: ${diffSeconds} detik lalu`;
+          if (diffSeconds < 3600) return `Offline sejak: ${Math.floor(diffSeconds / 60)} menit lalu`;
+          return `Offline sejak: ${Math.floor(diffSeconds / 3600)} jam lalu`;
+        },
+
+        async initApp() {
+          const savedPin = localStorage.getItem("ethol_pin");
+          if (savedPin) {
+            this.pinInput = savedPin;
+            await this.verifyPin();
+          }
+        },
+
+        async verifyPin() {
+          this.loading = true;
+          this.pinError = "";
+          try {
+            const res = await fetch(`${FIREBASE_URL}/config/master_pin.json`);
+            const correctPin = await res.json();
+            if (this.pinInput === String(correctPin) || (correctPin === null && this.pinInput === "123456")) {
+              localStorage.setItem("ethol_pin", this.pinInput);
+              this.isAuthenticated = true;
+              this.startRealtimeSync();
+            } else {
+              this.pinError = "PIN Salah! Coba lagi.";
+            }
+          } catch (e) {
+            this.pinError = "Gagal menghubungi database Firebase: " + e.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        logout() {
+          localStorage.removeItem("ethol_pin");
+          this.isAuthenticated = false;
+          this.pinInput = "";
+        },
+
+        startRealtimeSync() {
+          this.loadData();
+          setInterval(() => {
+            if (this.isAuthenticated) this.loadData();
+          }, 4000);
+        },
+
+        async loadData() {
+          try {
+            const dateStamp = this.getTodayDateStamp();
+            const [accRes, devRes, histRes, cfgRes, jadRes, doneRes] = await Promise.all([
+              fetch(`${FIREBASE_URL}/accounts.json`),
+              fetch(`${FIREBASE_URL}/device_status.json`),
+              fetch(`${FIREBASE_URL}/history.json`),
+              fetch(`${FIREBASE_URL}/config.json`),
+              fetch(`${FIREBASE_URL}/jadwal.json`),
+              fetch(`${FIREBASE_URL}/presensi_done/${dateStamp}.json`)
+            ]);
+
+            const rawAcc = await accRes.json();
+            this.accounts = Array.isArray(rawAcc) ? rawAcc : (rawAcc ? Object.values(rawAcc) : []);
+            this.deviceStatus = (await devRes.json()) || {};
+            const rawHist = await histRes.json();
+            this.history = Array.isArray(rawHist) ? rawHist : (rawHist ? Object.values(rawHist) : []);
+            this.history.reverse();
+            this.config = (await cfgRes.json()) || {};
+            this.jadwalData = (await jadRes.json()) || { jadwal: [] };
+            this.presensiDoneToday = (await doneRes.json()) || {};
+
+            // Watchdog: Cek apakah ESP32 mati & kirim alert ke Admin jika belum dikirim
+            await this.checkWatchdogAlert();
+          } catch (e) {
+            console.error("Error loading data:", e);
+          }
+        },
+
+        async checkWatchdogAlert() {
+          // Jangan kirim watchdog saat sedang proses test client
+          if (this.testingIndex !== null) return;
+
+          const epoch = this.lastSeenEpoch;
+          if (!epoch) return;
+          const nowEpoch = Math.floor(Date.now() / 1000);
+          const diffSeconds = nowEpoch - epoch;
+
+          // Jika mati lebih dari 120 detik dan belum pernah dikirim alert offline
+          if (diffSeconds > 120 && !this.deviceStatus.offline_alert_sent && !this._localAlertSent) {
+            this._localAlertSent = true;
+            console.warn("Watchdog: ESP32 Offline detected, sending alert to admin...");
+            const alertMsg = `🔴 *PERINGATAN: ESP32 OFFLINE (MATI LAMPU / TERPUTUS)*\n\nHardware ESP32 tidak mengirim heartbeat selama >2 menit.\nKemungkinan terjadi *mati lampu di kos* atau *WiFi terputus*.\n\n⏰ *Terakhir Aktif:* ${this.deviceStatus.last_seen || '-'}\n📌 *Status Terakhir:* ${this.deviceStatus.last_status || '-'}\n📚 *Matkul Terakhir:* ${this.deviceStatus.last_checked_matkul || '-'}\n\n_Segera periksa daya listrik / koneksi WiFi di kos._`;
+
+            try {
+              const fonnteKey = this.config.fonnte_token || FONNTE_TOKEN;
+              await fetch("https://api.fonnte.com/send", {
+                method: "POST",
+                headers: {
+                  "Authorization": fonnteKey,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  target: ADMIN_WA,
+                  message: alertMsg
+                })
+              });
+
+              await fetch(`${FIREBASE_URL}/device_status/offline_alert_sent.json`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(true)
+              });
+
+              await fetch(`${FIREBASE_URL}/history.json`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  matkul: "ESP32 Watchdog",
+                  status: "OFFLINE_ALERT",
+                  message: "Peringatan ESP32 mati/offline dikirim ke Admin WhatsApp"
+                })
+              });
+            } catch (err) {
+              console.error("Gagal kirim alert watchdog:", err);
+            }
+          }
+        },
+
+        async toggleAccount(index) {
+          this.accounts[index].is_active = !this.accounts[index].is_active;
+          await this.saveAccountsToFirebase();
+        },
+
+        openAddAccountModal() {
+          this.isEditing = false;
+          this.showPass = false;
+          this.modalForm = { name: "", user: "", pass: "", wa_target: "", tg_chat_id: "", is_active: true };
+          this.showModal = true;
+        },
+
+        openEditAccountModal(index) {
+          this.isEditing = true;
+          this.editIndex = index;
+          this.showPass = false;
+          this.modalForm = { ...this.accounts[index] };
+          this.showModal = true;
+        },
+
+        ghToken() {
+          return localStorage.getItem("ethol_gh_token") || this.config.github_token || "";
+        },
+
+        openConfigModal() {
+          let ids = this.config.manual_kuliah_ids;
+          if (Array.isArray(ids)) {
+            ids = ids.join(", ");
+          } else if (!ids) {
+            ids = "221835, 221847, 221839, 221840";
+          }
+          this.configForm = {
+            fonnte_token: this.config.fonnte_token || FONNTE_TOKEN,
+            telegram_bot_token: this.config.telegram_bot_token || "",
+            github_token: this.ghToken(),
+            manual_kuliah_ids: ids
+          };
+          this.showFonnteToken = false;
+          this.showTgToken = false;
+          this.showGhToken = false;
+          this.showConfigModal = true;
+        },
+
+        async saveConfig() {
+          try {
+            // Format ID matkul manual
+            const rawIds = (this.configForm.manual_kuliah_ids || "")
+              .split(",")
+              .map(s => s.trim())
+              .filter(s => s.length > 0);
+
+            // Token GitHub hanya disimpan di browser ini, tidak dikirim ke Firebase
+            localStorage.setItem("ethol_gh_token", (this.configForm.github_token || "").trim());
+
+            const payload = {
+              fonnte_token: this.configForm.fonnte_token,
+              telegram_bot_token: this.configForm.telegram_bot_token,
+              manual_kuliah_ids: rawIds
+            };
+
+            await fetch(`${FIREBASE_URL}/config.json`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            this.config = { ...this.config, ...payload };
+            this.showConfigModal = false;
+            alert("✅ Pengaturan berhasil disimpan!");
+          } catch (e) {
+            alert("Gagal menyimpan pengaturan ke Firebase: " + e.message);
+          }
+        },
+
+        async saveAccount() {
+          if (this.isEditing) {
+            this.accounts[this.editIndex] = { ...this.modalForm };
+          } else {
+            this.accounts.push({ ...this.modalForm });
+          }
+          this.showModal = false;
+          await this.saveAccountsToFirebase();
+        },
+
+        async deleteAccount(index) {
+          if (confirm(`Hapus akun ${this.accounts[index].name || this.accounts[index].user}?`)) {
+            this.accounts.splice(index, 1);
+            await this.saveAccountsToFirebase();
+          }
+        },
+
+        async saveAccountsToFirebase() {
+          try {
+            await fetch(`${FIREBASE_URL}/accounts.json`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.accounts)
+            });
+          } catch (e) {
+            alert("Gagal menyimpan perubahan ke Firebase!");
+          }
+        },
+
+        async testClientNotification(index) {
+          // Strict single-action lock: cegah duplicate click
+          if (this.testingIndex !== null) return;
+
+          const acc = this.accounts[index];
+          if (!acc.wa_target && !acc.tg_chat_id) {
+            alert("Akun ini belum memiliki nomor WhatsApp atau ID Telegram!");
+            return;
+          }
+
+          this.testingIndex = index;
+          const labelName = acc.name || acc.user.split("@")[0];
+          const nowWib = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+
+          const testMsg = `🔔 *Test Notifikasi Client ETHOL Bot*\n\nHalo *${labelName}*!\nKoneksi notifikasi untuk akun Anda (*${acc.user}*) telah aktif dan siap menerima status presensi otomatis.\n\n⏰ *Waktu Tes:* ${nowWib} WIB\n\n_Pesan otomatis dikirim dari Dashboard HP._`;
+
+          const results = [];
+          const errors = [];
+
+          try {
+            // 1. WhatsApp via Fonnte
+            if (acc.wa_target) {
+              try {
+                const fonnteKey = this.config.fonnte_token || FONNTE_TOKEN;
+                const res = await fetch("https://api.fonnte.com/send", {
+                  method: "POST",
+                  headers: {
+                    "Authorization": fonnteKey,
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    target: acc.wa_target,
+                    message: testMsg
+                  })
+                });
+                const data = await res.json();
+                if (data.status === true) {
+                  results.push(`WhatsApp (${acc.wa_target})`);
+                } else {
+                  errors.push(`WhatsApp: ${data.reason || data.message || "Gagal"}`);
+                }
+              } catch (e) {
+                errors.push("WhatsApp API error: " + e.message);
+              }
+            }
+
+            // 2. Telegram Bot API
+            if (acc.tg_chat_id) {
+              const tgToken = this.config.telegram_bot_token;
+              if (!tgToken) {
+                errors.push("Telegram: Token Bot belum diisi di menu Pengaturan!");
+              } else {
+                try {
+                  const tgRes = await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      chat_id: acc.tg_chat_id,
+                      text: testMsg,
+                      parse_mode: "Markdown"
+                    })
+                  });
+                  const tgData = await tgRes.json();
+                  if (tgData.ok === true) {
+                    results.push(`Telegram (${acc.tg_chat_id})`);
+                  } else {
+                    errors.push(`Telegram: ${tgData.description || "Gagal"}`);
+                  }
+                } catch (e) {
+                  errors.push("Telegram API error: " + e.message);
+                }
+              }
+            }
+
+            // Logging & Alert
+            if (results.length > 0) {
+              alert(`✅ Berhasil mengirim notifikasi test client ke:\n- ${results.join("\n- ")}` + (errors.length > 0 ? `\n\nCatatan:\n- ${errors.join("\n- ")}` : ""));
+
+              await fetch(`${FIREBASE_URL}/history.json`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  matkul: "Test Client Notification",
+                  status: "TEST_OK",
+                  message: `Notifikasi terkirim ke ${labelName} via ${results.join(", ")}`
+                })
+              });
+            } else {
+              alert(`❌ Gagal mengirim notifikasi client:\n${errors.join("\n")}`);
+            }
+          } finally {
+            this.testingIndex = null;
+          }
+        },
+
+        async verifyEtholAccount(index) {
+          if (this.verifyingIndex !== null) return;
+          this.verifyingIndex = index;
+          const acc = this.accounts[index];
+          const userEmail = acc.user;
+          const labelName = acc.name || userEmail.split("@")[0];
+
+          try {
+            // 1. Reset hasil verifikasi sebelumnya di Firebase
+            await fetch(`${FIREBASE_URL}/verify_result.json`, {
+              method: "DELETE"
+            });
+
+            // 2. Tulis permintaan verifikasi PENDING ke Firebase
+            await fetch(`${FIREBASE_URL}/verify_request.json`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                status: "PENDING",
+                user: userEmail,
+                timestamp: new Date().toISOString()
+              })
+            });
+
+            // 3. Trigger GitHub Actions via Repository Dispatch API
+            const ghToken = this.ghToken();
+            const ghRepo = "viefemm/authol-e";
+            
+            if (ghToken) {
+              try {
+                await fetch(`https://api.github.com/repos/${ghRepo}/dispatches`, {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${ghToken}`,
+                    "Accept": "application/vnd.github.v3+json",
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    event_type: "ethol_verify_account",
+                    client_payload: {
+                      action: "verify",
+                      target_user: userEmail
+                    }
+                  })
+                });
+              } catch (errGh) {
+                console.warn("GitHub Dispatch fallback:", errGh);
+              }
+            }
+
+            // 4. Polling Firebase untuk menunggu hasil verifikasi dari Cloud Runner (maks 25 detik)
+            let verifiedResult = null;
+            for (let i = 0; i < 12; i++) {
+              await new Promise(r => setTimeout(r, 2000));
+              try {
+                const checkRes = await fetch(`${FIREBASE_URL}/verify_result.json`);
+                const data = await checkRes.json();
+                if (data && data.user === userEmail) {
+                  verifiedResult = data;
+                  break;
+                }
+              } catch (e) {}
+            }
+
+            await this.loadData();
+
+            if (verifiedResult) {
+              if (verifiedResult.status === "SUCCESS") {
+                alert(`✅ Verifikasi ETHOL Berhasil!\n\n👤 Nama Resmi: ${verifiedResult.nama}\n🆔 NRP / Nomor: ${verifiedResult.nrp}\n📧 Email: ${userEmail}\n\nKoneksi login MIS CAS dan token SSO ETHOL akun ini 100% valid.`);
+              } else {
+                alert(`❌ Verifikasi ETHOL Gagal!\n\n👤 Akun: ${labelName} (${userEmail})\n⚠️ Kendala: ${verifiedResult.error || "Login ditolak"}\n\nPeriksa kembali username atau password SSO Anda.`);
+              }
+            } else {
+              alert(`⏳ Permintaan verifikasi untuk ${labelName} sedang diproses oleh Cloud Worker.\nSilakan refresh dashboard dalam beberapa saat.`);
+            }
+
+          } catch (e) {
+            alert("Error saat verifikasi akun: " + e.message);
+          } finally {
+            this.verifyingIndex = null;
+          }
+        },
+
+        async testWhatsAppChannel() {
+          if (this.testingWa) return;
+          this.testingWa = true;
+          const adminTarget = this.config.admin_wa || (this.accounts[0] && this.accounts[0].wa_target) || "";
+          const nowWib = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+          const msg = `🔔 *Test Gateway WhatsApp Fonnte*\n\nKoneksi API Fonnte berhasil terverifikasi dan aktif!\n\n⏰ *Waktu:* ${nowWib} WIB\n📱 *Admin:* ${adminTarget}\n\n_Pesan otomatis dikirim dari Web Dashboard ETHOL Bot._`;
+
+          try {
+            const fonnteKey = this.config.fonnte_token || FONNTE_TOKEN;
+            if (!fonnteKey) {
+              alert("⚠️ Token Fonnte belum diatur di menu Pengaturan!");
+              return;
+            }
+            if (!adminTarget) {
+              alert("⚠️ Nomor Admin WA belum diatur di Firebase atau akun!");
+              return;
+            }
+            const res = await fetch("https://api.fonnte.com/send", {
+              method: "POST",
+              headers: {
+                "Authorization": fonnteKey,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                target: adminTarget,
+                message: msg
+              })
+            });
+            const data = await res.json();
+            if (data.status === true) {
+              alert(`✅ WhatsApp Gateway Normal!\nPesan uji coba berhasil dikirim ke Admin (${adminTarget}).`);
+              await fetch(`${FIREBASE_URL}/history.json`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  matkul: "Test Gateway WhatsApp",
+                  status: "TEST_OK",
+                  message: `Uji coba WhatsApp Gateway ke Admin (${adminTarget}) berhasil.`
+                })
+              });
+              await this.loadData();
+            } else {
+              alert(`❌ Gagal kirim WA Fonnte: ${data.reason || data.message || "Unknown error"}`);
+            }
+          } catch (e) {
+            alert("❌ Gagal terhubung ke API Fonnte: " + e.message);
+          } finally {
+            this.testingWa = false;
+          }
+        },
+
+        async testTelegramChannel() {
+          if (this.testingTg) return;
+          const tgToken = this.config.telegram_bot_token;
+          if (!tgToken) {
+            if (confirm("⚠️ Token Bot Telegram belum diatur!\n\nApakah Anda ingin membuka menu Pengaturan untuk memasukkan token bot Telegram?")) {
+              this.openConfigModal();
+            }
+            return;
+          }
+
+          this.testingTg = true;
+          try {
+            const res = await fetch(`https://api.telegram.org/bot${tgToken}/getMe`);
+            const data = await res.json();
+            if (data.ok === true) {
+              const botInfo = data.result;
+              alert(`✅ Bot Telegram Terhubung!\n\n🤖 Nama Bot: ${botInfo.first_name}\n🔗 Username: @${botInfo.username}\n🆔 Bot ID: ${botInfo.id}\n\nGateway Telegram siap digunakan untuk notifikasi.`);
+            } else {
+              alert(`❌ Token Telegram Tidak Valid: ${data.description || "Gagal verifikasi token"}\n\nSilakan periksa kembali di menu Pengaturan.`);
+            }
+          } catch (e) {
+            alert("❌ Gagal menghubungi API Telegram: " + e.message);
+          } finally {
+            this.testingTg = false;
+          }
+        },
+
+        async triggerCloudPresensi() {
+          if (!confirm("Trigger presensi sekarang langsung ke GitHub Actions Cloud Worker?\n\n(ESP32 tidak diperlukan untuk trigger ini)")) return;
+          this.actionLoading = true;
+          try {
+            const ghToken = this.ghToken();
+            const ghRepo = "viefemm/authol-e";
+
+            // Fallback: jika token belum diatur, tetap bisa lewat ESP32
+            if (!ghToken) {
+              await fetch(`${FIREBASE_URL}/device_status/manual_trigger.json`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(true)
+              });
+              alert("⚠️ GitHub token belum diatur di menu Pengaturan.\nTrigger dialihkan ke ESP32 (fallback).");
+              return;
+            }
+
+            // Langsung panggil Repository Dispatch API (tanpa perantara ESP32)
+            const res = await fetch(`https://api.github.com/repos/${ghRepo}/dispatches`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${ghToken}`,
+                "Accept": "application/vnd.github.v3+json",
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                event_type: "ethol_presensi_trigger",
+                client_payload: {
+                  matkul: "Manual Trigger - Dashboard",
+                  kuliah_id: "0"
+                }
+              })
+            });
+
+            if (res.status !== 204) {
+              const errText = await res.text();
+              throw new Error(`GitHub API HTTP ${res.status}: ${errText.slice(0, 200)}`);
+            }
+
+            await fetch(`${FIREBASE_URL}/history.json`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                timestamp: new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
+                matkul: "Manual Trigger",
+                status: "TRIGGERED",
+                message: "Dipicu manual dari Web Dashboard, langsung ke GitHub Actions"
+              })
+            });
+
+            alert("✅ Trigger terkirim langsung ke GitHub Actions.\nCloud worker akan berjalan dalam beberapa detik. Cek riwayat untuk hasilnya.");
+          } catch (e) {
+            alert("❌ Gagal trigger ke GitHub Actions: " + e.message + "\n\nCoba lagi, atau gunakan fallback ESP32 dengan mengosongkan GitHub token di Pengaturan.");
+          } finally {
+            this.actionLoading = false;
+          }
+        },
+
+        getTodayDateStamp() {
+          const now = new Date();
+          const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+          const wib = new Date(utc + (3600000 * 7));
+          const y = wib.getFullYear();
+          const m = String(wib.getMonth() + 1).padStart(2, '0');
+          const d = String(wib.getDate()).padStart(2, '0');
+          return `${y}${m}${d}`;
+        },
+
+        getTodayDayName() {
+          const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jum'at", "Sabtu"];
+          const now = new Date();
+          const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+          const wib = new Date(utc + (3600000 * 7));
+          return days[wib.getDay()];
+        },
+
+        getTodayFormattedIndo() {
+          const now = new Date();
+          const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+          const wib = new Date(utc + (3600000 * 7));
+          const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jum'at", "Sabtu"];
+          const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+          return `${days[wib.getDay()]}, ${wib.getDate()} ${months[wib.getMonth()]} ${wib.getFullYear()}`;
+        },
+
+        normalizeDay(str) {
+          if (!str) return "";
+          return String(str).replace(/['`]/g, "").toLowerCase().trim();
+        },
+
+        isTodayCourse(dayStr) {
+          return this.normalizeDay(dayStr) === this.normalizeDay(this.getTodayDayName());
+        },
+
+        isPresensiDone(kuliahId) {
+          if (!this.presensiDoneToday || !kuliahId) return false;
+          const entry = this.presensiDoneToday[String(kuliahId)];
+          if (!entry) return false;
+          return Object.values(entry).some(v => v === true);
+        },
+
+        presensiDoneCount(kuliahId) {
+          if (!this.presensiDoneToday || !kuliahId) return 0;
+          const entry = this.presensiDoneToday[String(kuliahId)];
+          if (!entry) return 0;
+          return Object.values(entry).filter(v => v === true).length;
+        },
+
+        get filteredJadwal() {
+          const list = (this.jadwalData && Array.isArray(this.jadwalData.jadwal)) ? this.jadwalData.jadwal : [];
+          if (this.selectedDay === 'all') {
+            return list;
+          }
+          if (this.selectedDay === 'today') {
+            const todayName = this.getTodayDayName();
+            return list.filter(item => this.normalizeDay(item.hari) === this.normalizeDay(todayName));
+          }
+          return list.filter(item => this.normalizeDay(item.hari) === this.normalizeDay(this.selectedDay));
+        },
+
+        get todayMatkulCount() {
+          const list = (this.jadwalData && Array.isArray(this.jadwalData.jadwal)) ? this.jadwalData.jadwal : [];
+          const todayName = this.getTodayDayName();
+          return list.filter(item => this.normalizeDay(item.hari) === this.normalizeDay(todayName)).length;
+        },
+
+        get todayDoneMatkulCount() {
+          const list = (this.jadwalData && Array.isArray(this.jadwalData.jadwal)) ? this.jadwalData.jadwal : [];
+          const todayName = this.getTodayDayName();
+          return list.filter(item => this.normalizeDay(item.hari) === this.normalizeDay(todayName) && this.isPresensiDone(item.kuliah)).length;
+        },
+
+        getDayCount(dayName) {
+          const list = (this.jadwalData && Array.isArray(this.jadwalData.jadwal)) ? this.jadwalData.jadwal : [];
+          return list.filter(item => this.normalizeDay(item.hari) === this.normalizeDay(dayName)).length;
+        },
+
+        async triggerMatkul(item) {
+          const namaMatkul = item.matkul || `ID ${item.kuliah}`;
+          if (!confirm(`Trigger presensi langsung sekarang untuk mata kuliah:\n"${namaMatkul}" (ID: ${item.kuliah})?\n\nCloud worker akan segera memproses sesi kuliah ini.`)) return;
+
+          this.actionLoading = true;
+          try {
+            const ghToken = this.ghToken();
+            const ghRepo = "viefemm/authol-e";
+
+            if (!ghToken) {
+              await fetch(`${FIREBASE_URL}/device_status/manual_trigger.json`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(true)
+              });
+              alert(`⚠️ GitHub token belum diatur di menu Pengaturan.\nTrigger untuk "${namaMatkul}" dialihkan ke ESP32 (fallback).`);
+              return;
+            }
+
+            const res = await fetch(`https://api.github.com/repos/${ghRepo}/dispatches`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${ghToken}`,
+                "Accept": "application/vnd.github.v3+json",
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                event_type: "ethol_presensi_trigger",
+                client_payload: {
+                  matkul: namaMatkul,
+                  kuliah_id: String(item.kuliah)
+                }
+              })
+            });
+
+            if (res.status !== 204) {
+              const errText = await res.text();
+              throw new Error(`GitHub API HTTP ${res.status}: ${errText.slice(0, 200)}`);
+            }
+
+            await fetch(`${FIREBASE_URL}/history.json`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                timestamp: new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
+                matkul: namaMatkul,
+                status: "TRIGGERED",
+                message: `Dipicu manual dari Jadwal Kuliah Dashboard (Kuliah ID: ${item.kuliah})`
+              })
+            });
+
+            alert(`✅ Trigger untuk "${namaMatkul}" berhasil dikirim ke Cloud Worker!\nPresensi akan diproses dalam beberapa detik.`);
+            await this.loadData();
+          } catch (e) {
+            alert("❌ Gagal trigger presensi: " + e.message);
+          } finally {
+            this.actionLoading = false;
+          }
+        },
+
+        async syncJadwal() {
+          if (this.syncingJadwal) return;
+          this.syncingJadwal = true;
+          try {
+            const ghToken = this.ghToken();
+            const ghRepo = "viefemm/authol-e";
+            if (ghToken) {
+              const res = await fetch(`https://api.github.com/repos/${ghRepo}/dispatches`, {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${ghToken}`,
+                  "Accept": "application/vnd.github.v3+json",
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  event_type: "ethol_sync_jadwal",
+                  client_payload: {
+                    action: "sync_jadwal"
+                  }
+                })
+              });
+              if (res.status === 204) {
+                alert("✅ Perintah sinkronisasi jadwal terkirim ke Cloud Worker.\nJadwal ETHOL akan diperbarui otomatis dalam 1-2 menit.");
+              } else {
+                throw new Error(`HTTP ${res.status}`);
+              }
+            } else {
+              alert("⚠️ GitHub Token belum diatur di menu Pengaturan.\nSinkronisasi jadwal memerlukan token GitHub untuk trigger Cloud Worker.");
+            }
+            await this.loadData();
+          } catch (e) {
+            alert("❌ Gagal mengirim perintah sinkronisasi jadwal: " + e.message);
+          } finally {
+            this.syncingJadwal = false;
+          }
+        }
+      }
+    }
+  </script>
+</body>
+</html>

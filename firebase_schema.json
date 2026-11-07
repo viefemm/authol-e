@@ -1,0 +1,44 @@
+{
+  "config": {
+    "master_pin": "123456",
+    "fonnte_token": "YOUR_FONNTE_TOKEN",
+    "telegram_bot_token": "",
+    "github_token": "",
+    "github_repo": "USERNAME/REPO_NAME",
+    "manual_kuliah_ids": [
+      "221835",
+      "221847",
+      "221839",
+      "221840"
+    ]
+  },
+  "accounts": [
+    {
+      "name": "Mahasiswa 1",
+      "user": "contoh.mahasiswa@student.pens.ac.id",
+      "pass": "PasswordSSO123",
+      "wa_target": "628xxxxxxxxxx",
+      "tg_chat_id": "",
+      "is_active": true,
+      "verified": false,
+      "verify_status": "-",
+      "verify_message": "-"
+    }
+  ],
+  "device_status": {
+    "last_seen": "-",
+    "last_seen_epoch": 0,
+    "last_status": "Menunggu Boot ESP32",
+    "last_checked_matkul": "-",
+    "offline_alert_sent": false,
+    "manual_trigger": false
+  },
+  "history": {
+    "init": {
+      "timestamp": "2026-01-01 00:00:00",
+      "matkul": "Inisialisasi Sistem",
+      "status": "INIT",
+      "message": "Sistem ETHOL Presensi Bot V2.0 siap digunakan."
+    }
+  }
+}

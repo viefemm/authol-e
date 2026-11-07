@@ -1,0 +1,17 @@
+# Private Secrets & Config
+**/secrets.h
+.env
+*.env
+
+# Build outputs
+.pio/
+.vscode/
+__pycache__/
+*.pyc
+*.bin
+*.elf
+
+# System files
+.DS_Store
+Thumbs.db
+bot_log.txt

@@ -1,0 +1,62 @@
+name: ETHOL Presensi Bot
+
+on:
+  schedule:
+    # Fail-safe sementara: cloud tetap mengecek tiap 20 menit selama jam kuliah
+    # (Senin-Jumat 06:00-21:00 WIB). Dedup Firebase mencegah submit/WA ganda.
+    - cron: '*/20 0-14 * * 1-5'
+    - cron: '0,20,40 23 * * 0-4'
+  workflow_dispatch:  # Trigger manual via Web Dashboard / GitHub UI
+    inputs:
+      action:
+        description: 'Action (presensi or verify)'
+        required: false
+        default: 'presensi'
+      target_user:
+        description: 'Target user to verify'
+        required: false
+        default: 'all'
+  repository_dispatch:  # Trigger instan On-Demand via ESP32 Hardware / Web Dashboard
+    types: [ethol_presensi_trigger, ethol_verify_account, ethol_sync_jadwal]
+
+jobs:
+  presensi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pytz
+
+      - name: Run ETHOL Bot / Verifier
+        shell: bash
+        env:
+          FONNTE_TOKEN: ${{ secrets.FONNTE_TOKEN }}
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
+          ADMIN_WA: ${{ secrets.ADMIN_WA }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          JAM_MULAI: "6"
+          JAM_SELESAI: "21"
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_ACTION: ${{ github.event.action }}
+          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          set -eo pipefail
+          python cloud-worker/app_actions.py 2>&1 | tee bot_log.txt
+
+      - name: Upload Log File (.txt)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-run-log
+          path: bot_log.txt
+          retention-days: 7
