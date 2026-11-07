@@ -443,7 +443,7 @@
                         class="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
                         title="Verifikasi koneksi login MIS CAS dan token SSO ETHOL akun ini">
                   <i class="fa-solid" :class="verifyingIndex === index ? 'fa-spinner fa-spin' : 'fa-graduation-cap'"></i>
-                  <span x-text="verifyingIndex === index ? 'Verifikasi...' : 'Cek ETHOL'"></span>
+                  <span x-text="verifyingIndex === index ? ('Verifikasi... ' + verifyingSec + 's') : 'Cek ETHOL'"></span>
                 </button>
               </div>
 
@@ -665,6 +665,7 @@
         actionLoading: false,
         testingIndex: null,
         verifyingIndex: null,
+        verifyingSec: 0,
         testingWa: false,
         testingTg: false,
         showPass: false,
@@ -859,7 +860,7 @@
         },
 
         ghToken() {
-          return localStorage.getItem("ethol_gh_token") || this.config.github_token || "";
+          return localStorage.getItem("ethol_gh_token") || "";
         },
 
         hasSavedToken(kind) {
@@ -910,8 +911,6 @@
 
             if (tgVal) payload.telegram_bot_token = tgVal;
             else if (this.configForm.clear_tg) payload.telegram_bot_token = "";
-
-            if (this.configForm.clear_gh && this.config.github_token) payload.github_token = "";
 
             await fetch(`${FIREBASE_URL}/config.json`, {
               method: 'PATCH',
@@ -1053,18 +1052,23 @@
 
         async verifyEtholAccount(index) {
           if (this.verifyingIndex !== null) return;
+          const ghToken = this.ghToken();
+          if (!ghToken) {
+            if (confirm("⚠️ GitHub Personal Access Token belum diisi di browser ini.\n\nBuka menu Pengaturan sekarang untuk mengisi token?")) {
+              this.openConfigModal();
+            }
+            return;
+          }
+
           this.verifyingIndex = index;
+          this.verifyingSec = 0;
           const acc = this.accounts[index];
           const userEmail = acc.user;
           const labelName = acc.name || userEmail.split("@")[0];
 
           try {
-            // 1. Reset hasil verifikasi sebelumnya di Firebase
-            await fetch(`${FIREBASE_URL}/verify_result.json`, {
-              method: "DELETE"
-            });
-
-            // 2. Tulis permintaan verifikasi PENDING ke Firebase
+            // 1. Reset hasil verifikasi sebelumnya & catat request PENDING di Firebase
+            await fetch(`${FIREBASE_URL}/verify_result.json`, { method: "DELETE" });
             await fetch(`${FIREBASE_URL}/verify_request.json`, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
@@ -1075,40 +1079,37 @@
               })
             });
 
-            // 3. Trigger GitHub Actions via Repository Dispatch API
-            const ghToken = this.ghToken();
+            // 2. Trigger GitHub Actions via Repository Dispatch API
             const ghRepo = "viefemm/authol-e";
-            
-            if (ghToken) {
-              try {
-                await fetch(`https://api.github.com/repos/${ghRepo}/dispatches`, {
-                  method: "POST",
-                  headers: {
-                    "Authorization": `Bearer ${ghToken}`,
-                    "Accept": "application/vnd.github.v3+json",
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                    event_type: "ethol_verify_account",
-                    client_payload: {
-                      action: "verify",
-                      target_user: userEmail
-                    }
-                  })
-                });
-              } catch (errGh) {
-                console.warn("GitHub Dispatch fallback:", errGh);
-              }
+            const ghRes = await fetch(`https://api.github.com/repos/${ghRepo}/dispatches`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${ghToken}`,
+                "Accept": "application/vnd.github+json",
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                event_type: "ethol_verify_account",
+                client_payload: {
+                  action: "verify",
+                  target_user: userEmail
+                }
+              })
+            });
+
+            if (!ghRes.ok) {
+              throw new Error(`GitHub API HTTP ${ghRes.status} — periksa GitHub Personal Access Token di menu Pengaturan.`);
             }
 
-            // 4. Polling Firebase untuk menunggu hasil verifikasi dari Cloud Runner (maks 25 detik)
+            // 3. Polling Firebase menunggu hasil Cloud Runner (maks 60 detik)
             let verifiedResult = null;
-            for (let i = 0; i < 12; i++) {
+            for (let i = 0; i < 30; i++) {
               await new Promise(r => setTimeout(r, 2000));
+              this.verifyingSec = (i + 1) * 2;
               try {
                 const checkRes = await fetch(`${FIREBASE_URL}/verify_result.json`);
                 const data = await checkRes.json();
-                if (data && data.user === userEmail) {
+                if (data && data.user && data.user.toLowerCase() === userEmail.toLowerCase()) {
                   verifiedResult = data;
                   break;
                 }
@@ -1124,13 +1125,14 @@
                 alert(`❌ Verifikasi ETHOL Gagal!\n\n👤 Akun: ${labelName} (${userEmail})\n⚠️ Kendala: ${verifiedResult.error || "Login ditolak"}\n\nPeriksa kembali username atau password SSO Anda.`);
               }
             } else {
-              alert(`⏳ Permintaan verifikasi untuk ${labelName} sedang diproses oleh Cloud Worker.\nSilakan refresh dashboard dalam beberapa saat.`);
+              alert(`⏳ Cloud Worker masih memproses (>60 detik) untuk ${labelName}.\nBadge status pada kartu akun akan otomatis ter-update saat selesai.`);
             }
 
           } catch (e) {
-            alert("Error saat verifikasi akun: " + e.message);
+            alert("❌ Gagal memverifikasi akun: " + e.message);
           } finally {
             this.verifyingIndex = null;
+            this.verifyingSec = 0;
           }
         },
 
